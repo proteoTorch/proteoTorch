@@ -119,7 +119,7 @@ def getMixMaxCount(combined, h_w_le_z, h_z_le_z):
 def getQValues(pi0, combined, qvals, skipDecoysPlusOne = False):
     """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
     """
-    scoreInd = _scoreInd # Understood preconditions
+    scoreInd = _scoreInd
     labelInd = _labelInd
 
     h_w_le_z = [] # N_{w<=z} and N_{z<=z}
@@ -182,8 +182,6 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     qvals = []
     pi0 = 1.
     getQValues(pi0, all, qvals, skipDecoysPlusOne)
-
-    print len(qvals), len(all)
     
     taq = []
     daq = []
@@ -199,6 +197,8 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
                 daq.append(curr_og_idx)
     return taq,daq, [qvals[i] for _,_,i in all]
 
+# Note: below does not handle ties at all, which becomes very problematic when handling discrete features
+# or p-value scores (where many PSMs have zero or unity scores)
 def calcQOld(scores, labels,
              thresh = 0.01):
     """Returns q-values and the indices of the positive class such that q <= thresh
@@ -1143,7 +1143,29 @@ def findInitDirection(X, Y, thresh):
 
 def getDecoyIdx(labels, ids):
     return [i for i in ids if labels[i] != 1]
-        
+
+def searchForInitialDirection(keys, X, Y, q):
+    """ Iterate through cross validation training sets and find initial search directions
+        Returns the scores for the disjoint bins
+    """
+    scores = np.zeros(Y.shape)
+    # split dataset into thirds for testing/training
+    m = len(keys)/3
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+
+        trainSids = list(set(keys) - set(testSids))
+
+        # Find initial direction
+        initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q)
+        print "CV fold %d: could separate %d PSMs in initial direction %d" % (kFold, numIdentified, initDir)
+        scores[trainSids] = X[trainSids,initDir]
+    return scores
+
+
 def discFunc(options, output):
     q = 0.01
     f = options.pin
@@ -1152,6 +1174,7 @@ def discFunc(options, output):
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
     target_rows, decoy_rows, pepstrings, X, Y = load_pin_return_featureMatrix(f)
+
     # get mapping from rows to spectrum ids
     target_rowsToSids = {}
     decoy_rowsToSids = {}
@@ -1159,31 +1182,31 @@ def discFunc(options, output):
         target_rowsToSids[target_rows[tr]] = tr
     for dr in decoy_rows:
         decoy_rowsToSids[decoy_rows[dr]] = dr
+
     l = X.shape
     n = l[0] # number of instances
     m = l[1] # number of features
 
     # Assuming, for now, that target-decoy competition is to be conducted, 
     # i.e., that a concatenated search has not been input
-    # Note: we're not performing TDC right now (just mix-max), add TDC later
+    # Note: we're not performing TDC right now, add TDC later
     print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
     keys = range(n)
 
-    # Find initial direction
-    initDir, numIdentified = findInitDirection(X, Y, q)
-    # Gather scores
-    scores = np.array([X[i,initDir] for i in keys])
-
     shuffle(keys)
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
     t_scores = {}
     d_scores = {}
+
+    scores = searchForInitialDirection(keys, X, Y, q)
+    # # Find initial direction
+    # initDir, numIdentified = findInitDirection(X, Y, q)
+    # # Gather scores
+    # scores = np.array([X[i,initDir] for i in keys])
 
     numIdentified = doLda(q, keys, scores, X, Y, 
                           t_scores, d_scores, 
                           target_rowsToSids, decoy_rowsToSids)
-    print "iter %d: %d targets" % (i, numIdentified)
+    print "LDA: %d targets" % (numIdentified)
 
     fid = open(output, 'w')
     fid.write("Kind\tSid\tPeptide\tScore\n")
