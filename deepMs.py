@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 #
-# Copyright 2011 <fill in later>
+# Written by John Halloran <jthalloran@ucdavis.edu>
+#
+# Copyright (C) 2020 John Halloran
+# Licensed under the Open Software License version 3.0
+# See COPYING or http://opensource.org/licenses/OSL-3.0
 
 from __future__ import with_statement
 
@@ -22,9 +26,6 @@ import util.args
 import util.iterables
 import struct
 import array
-from msutil.spectrum import MS2Spectrum, MS2Iterator
-
-import visualize.parsers
 
 from random import shuffle
 from scipy import linalg, stats
@@ -32,6 +33,9 @@ import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 import mixture
 
+#########################################################
+################### Global variables
+#########################################################
 _debug=True
 _mergescore=True
 _includeNegativesInResult=True
@@ -39,162 +43,6 @@ _includeNegativesInResult=True
 _scoreInd=0
 _labelInd=1
 _indInd=2 # Used to keep track of feature matrix rows when sorting based on score
-
-def load_sids(spectra):
-    return list(s.spectrum_id for s in MS2Iterator(spectra, False))
-
-def targetsAtQ(targets, decoys, thresh = 0.01):
-    """Returns q-values along with target PSMs
-       serialized array: 1) Scan number, 2) Score, 3) charge, 4) Peptide Length, 5)...
-    """
-    all = []
-    for sid in targets:
-        if sid in decoys: # only consider common intersection
-            t = targets[sid]
-            d = decoys[sid]
-            if t[1] > d[1]:
-                all.append((t, 1))
-            else:
-                all.append((d, 0))
-
-    #--- sort descending
-    all.sort( lambda x,y: cmp(y[0][1], x[0][1]) )
-    fdrs = []
-    posTot = 0.0
-    fpTot = 0.0
-    fdr = 0.0
-
-    #--- iterates through scores
-    for item in all:
-        if item[1] == 1: 
-            posTot += 1.0
-        else: 
-            fpTot += 1.0
-    
-        #--- check for zero positives
-        if posTot == 0.0: 
-            fdr = 100.0
-        else: 
-            fdr = fpTot / posTot
-        #--- note the q
-        fdrs.append(fdr)
-
-    taq = []
-    daq = []
-    lastQ = 100.0
-    for idx in range(len(fdrs)-1, -1, -1):
-    
-        q = 0.0
-        #--- q can never go up. 
-        if lastQ < fdrs[idx]:
-            q = lastQ
-        else:
-            q = fdrs[idx]
-        lastQ = q
-    
-        if all[idx][1]:
-            taq.append( ( q, all[idx][0] ) )
-        else:
-            daq.append( ( q, all[idx][0] ) )
-
-    taq.sort(key = lambda r: r[0])
-    daq.sort(key = lambda r: r[0])
-
-    all = []
-    for t in taq:
-        if t[0] > thresh:
-            break
-        else:
-            all.append((t[1], 1))
-    for d in daq:
-        if d[0] > thresh:
-            break
-        else:
-            all.append((d[1], 0))
-
-    shuffle(all)
-    features = [x[0] for x in all]
-    labels = [x[1] for x in all]
-    return features, labels
-
-def targetsAtQ_subsetSids(targets, decoys, thresh = 0.01, sids = {}, wasIdent = False):
-    """Returns q-values along with target PSMs
-       serialized array: 0) Scan number, 1) Score, 2) charge, 3) Peptide Length, 4)...
-    """
-    all = []
-    for sid in sids:
-        if sid in decoys and sid in targets: # only consider common intersection
-            t = targets[sid]
-            d = decoys[sid]
-            if t[1] > d[1]:
-                all.append((t, 1))
-            else:
-                all.append((d, 0))
-
-    #--- sort descending
-    all.sort( lambda x,y: cmp(y[0][1], x[0][1]) )
-    fdrs = []
-    posTot = 0.0
-    fpTot = 0.0
-    fdr = 0.0
-
-    #--- iterates through scores
-    for item in all:
-        if item[1] == 1: 
-            posTot += 1.0
-        else: 
-            fpTot += 1.0
-    
-        #--- check for zero positives
-        if posTot == 0.0: 
-            fdr = 100.0
-        else: 
-            fdr = fpTot / posTot
-        #--- note the q
-        fdrs.append(fdr)
-
-    taq = []
-    daq = []
-    lastQ = 100.0
-    for idx in range(len(fdrs)-1, -1, -1):
-    
-        q = 0.0
-        #--- q can never go up. 
-        if lastQ < fdrs[idx]:
-            q = lastQ
-        else:
-            q = fdrs[idx]
-        lastQ = q
-    
-        if all[idx][1]:
-            taq.append( ( q, all[idx][0] ) )
-        else:
-            daq.append( ( q, all[idx][0] ) )
-
-    taq.sort(key = lambda r: r[0])
-    daq.sort(key = lambda r: r[0])
-
-    all = []
-    for t in taq:
-        if t[0] > thresh:
-            break
-        else:
-            all.append((t[1], 1))
-    for d in daq:
-        if d[0] > thresh:
-            break
-        else:
-            all.append((d[1], 0))
-
-    shuffle(all)
-    features = []
-    if wasIdent:
-        features = [x[0][1] for x in all]
-    else:
-        features = [x[0] for x in all]
-
-    labels = [x[1] for x in all]
-    return features, labels
 
 def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     """ Returns the minimal score which achieves the specified threshold and the
