@@ -38,7 +38,7 @@ import mixture
 #########################################################
 _debug=True
 _verb=1
-_mergescore=False
+_mergescore=True
 _includeNegativesInResult=True
 # General assumed iterators for lists of score tuples
 _scoreInd=0
@@ -1169,73 +1169,6 @@ def searchForInitialDirection(keys, X, Y, q, featureNames):
         scores[trainSids] = X[trainSids,initDir]
     return scores
 
-def discFunc(options, output):
-    q = 0.01
-    f = options.pin
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
-    # X: standard-normalized feature matrix
-    # Y: binary labels, true denoting a target PSM
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
-
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
-
-    l = X.shape
-    n = l[0] # number of instances
-    m = l[1] # number of features
-
-    # Assuming, for now, that target-decoy competition is to be conducted, 
-    # i.e., that a concatenated search has not been input
-    # Note: we're not performing TDC right now, add TDC later
-    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
-    keys = range(n)
-
-    shuffle(keys)
-    t_scores = {}
-    d_scores = {}
-
-    initDir = options.initDirection
-    if initDir > -1 and initDir < m:
-        print "Using specified initial direction %d" % (initDir)
-        # Gather scores
-        scores = X[:,initDir]
-        taq, _, _ = calcQ(scores, Y, q, False)
-        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
-    else:
-        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
-
-    numIdentified = doLda(q, keys, scores, X, Y, 
-                          t_scores, d_scores, 
-                          target_rowsToSids, decoy_rowsToSids)
-    print "LDA finished, identified %d targets at q=%.2f" % (numIdentified, q)
-
-    fid = open(output, 'w')
-    fid.write("Kind\tSid\tPeptide\tScore\n")
-    counter = 0
-    for i in range(n):
-        if Y[i] == 1:
-            sid = target_rowsToSids[i]
-            score = t_scores[sid]
-            p = pepstrings[i]
-            fid.write("t\t%d\t%s\t%f\n"
-                      % (sid,p,score))
-            counter += 1
-        else:
-            sid = decoy_rowsToSids[i]
-            score = d_scores[sid]
-            p = pepstrings[i]
-            fid.write("d\t%d\t%s\t%f\n"
-                      % (sid,p,score))
-            counter += 1
-    fid.close()
-    print "Wrote %d PSMs" % counter
-
 def doLda(thresh, keys, scores, X, Y, 
           t_scores, d_scores, 
           target_rowsToSids, decoy_rowsToSids):
@@ -1288,45 +1221,10 @@ def doLda(thresh, keys, scores, X, Y,
     scores = newScores
     return totalTaq
 
-def discFuncIter(options, output):
-    q = 0.01
-    f = options.pin
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
-    # X: standard-normalized feature matrix
-    # Y: binary labels, true denoting a target PSM
-    target_rows, decoy_rows, pepstrings, X, Y = load_pin_return_featureMatrix(f)
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
-    l = X.shape
-    n = l[0] # number of instances
-    m = l[1] # number of features
-
-    # Assuming, for now, that target-decoy competition is to be conducted, 
-    # i.e., that a concatenated search has not been input
-    # Note: we're not performing TDC right now (just mix-max), add TDC later
-    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
-    keys = range(n)
-    # Find initial direction
-    initDir, numIdentified = findInitDirection(X, Y, q)
-    # Gather scores
-    scores = np.array([X[i,initDir] for i in keys])
-
-    shuffle(keys)
-    t_scores = {}
-    d_scores = {}
-
-    for i in range(10):
-        numIdentified = doIter(q, keys, scores, X, Y, 
-                               t_scores, d_scores, 
-                               target_rowsToSids, decoy_rowsToSids)
-        print "iter %d: %d targets" % (i, numIdentified)
-
+def writeOutput(output, Y, pepstrings,
+                target_rowsToSids, t_scores,
+                decoy_rowsToSids, d_scores):
+    n = len(Y)
     fid = open(output, 'w')
     fid.write("Kind\tSid\tPeptide\tScore\n")
     counter = 0
@@ -1347,6 +1245,105 @@ def discFuncIter(options, output):
             counter += 1
     fid.close()
     print "Wrote %d PSMs" % counter
+
+
+def discFunc(options, output):
+    q = 0.01
+    f = options.pin
+    # target_rows: dictionary mapping target sids to rows in the feature matrix
+    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
+    # X: standard-normalized feature matrix
+    # Y: binary labels, true denoting a target PSM
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
+
+    # get mapping from rows to spectrum ids
+    target_rowsToSids = {}
+    decoy_rowsToSids = {}
+    for tr in target_rows:
+        target_rowsToSids[target_rows[tr]] = tr
+    for dr in decoy_rows:
+        decoy_rowsToSids[decoy_rows[dr]] = dr
+
+    l = X.shape
+    n = l[0] # number of instances
+    m = l[1] # number of features
+
+    # Assuming, for now, that target-decoy competition is to be conducted, 
+    # i.e., that a concatenated search has not been input
+    # Note: we're not performing TDC right now, add TDC later
+    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
+    keys = range(n)
+
+    shuffle(keys)
+    t_scores = {}
+    d_scores = {}
+
+    initDir = options.initDirection
+    if initDir > -1 and initDir < m:
+        print "Using specified initial direction %d" % (initDir)
+        # Gather scores
+        scores = X[:,initDir]
+        taq, _, _ = calcQ(scores, Y, q, False)
+        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+    else:
+        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
+
+    numIdentified = doLda(q, keys, scores, X, Y, 
+                          t_scores, d_scores, 
+                          target_rowsToSids, decoy_rowsToSids)
+    print "LDA finished, identified %d targets at q=%.2f" % (numIdentified, q)
+
+    writeOutput(output, Y, pepstrings,
+                target_rowsToSids, t_scores,
+                decoy_rowsToSids, d_scores)
+
+def discFuncIter(options, output):
+    q = 0.01
+    f = options.pin
+    # target_rows: dictionary mapping target sids to rows in the feature matrix
+    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
+    # X: standard-normalized feature matrix
+    # Y: binary labels, true denoting a target PSM
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
+    # get mapping from rows to spectrum ids
+    target_rowsToSids = {}
+    decoy_rowsToSids = {}
+    for tr in target_rows:
+        target_rowsToSids[target_rows[tr]] = tr
+    for dr in decoy_rows:
+        decoy_rowsToSids[decoy_rows[dr]] = dr
+    l = X.shape
+    n = l[0] # number of instances
+    m = l[1] # number of features
+
+    # Assuming, for now, that target-decoy competition is to be conducted, 
+    # i.e., that a concatenated search has not been input
+    # Note: we're not performing TDC right now (just mix-max), add TDC later
+    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
+    keys = range(n)
+
+    shuffle(keys)
+    t_scores = {}
+    d_scores = {}
+
+    initDir = options.initDirection
+    if initDir > -1 and initDir < m:
+        print "Using specified initial direction %d" % (initDir)
+        # Gather scores
+        scores = X[:,initDir]
+        taq, _, _ = calcQ(scores, Y, q, False)
+        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+    else:
+        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
+
+    for i in range(10):
+        numIdentified = doLda(q, keys, scores, X, Y, 
+                              t_scores, d_scores, 
+                              target_rowsToSids, decoy_rowsToSids)
+        print "iter %d: %d targets" % (i, numIdentified)
+
+    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
+                decoy_rowsToSids, d_scores)
 
 if __name__ == '__main__':
     parser = optparse.OptionParser()
@@ -1370,5 +1367,5 @@ if __name__ == '__main__':
 
     _verb=options.verb
     discOutput = '%s_ppProcess.txt' % (options.filebase)
-    discFunc(options, discOutput)
-    # discFuncIter(options, discOutput)
+    # discFunc(options, discOutput)
+    discFuncIter(options, discOutput)
