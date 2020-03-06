@@ -37,7 +37,8 @@ import mixture
 ################### Global variables
 #########################################################
 _debug=True
-_mergescore=True
+_verb=1
+_mergescore=False
 _includeNegativesInResult=True
 # General assumed iterators for lists of score tuples
 _scoreInd=0
@@ -55,9 +56,8 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     all = zip(scores,labels, range(len(scores)))
     #--- sort descending
     all.sort( key = lambda r: -r[0])
-    qvals = []
     pi0 = 1.
-    getQValues(pi0, all, qvals, skipDecoysPlusOne)
+    qvals = getQValues(pi0, all, skipDecoysPlusOne)
 
     # Calculate minimum score which achieves q-value thresh
     u = all[0][scoreInd]
@@ -116,9 +116,10 @@ def getMixMaxCount(combined, h_w_le_z, h_z_le_z):
                 h_z_le_z.append(float(cnt_z))
             queue = 0
 
-def getQValues(pi0, combined, qvals, skipDecoysPlusOne = False):
+def getQValues(pi0, combined, skipDecoysPlusOne = False):
     """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
     """
+    qvals = []
     scoreInd = _scoreInd
     labelInd = _labelInd
 
@@ -156,7 +157,7 @@ def getQValues(pi0, combined, qvals, skipDecoysPlusOne = False):
                 if estPx_lt_zj < 0.:
                     estPx_lt_zj = 0.
                 E_f1_mod_run_tot += float(decoyQueue) * estPx_lt_zj * (1.0 - pi0)
-                if _debug:
+                if _debug and _verb >= 3:
                     print "Mix-max num negatives correction: %f vs. %f" % ((1.0 - pi0)*float(n_z_ge_w), E_f1_mod_run_tot)
 
             if _includeNegativesInResult:
@@ -169,9 +170,9 @@ def getQValues(pi0, combined, qvals, skipDecoysPlusOne = False):
             targetQueue = 0
     # Convert the FDRs into q-values.
     # Below is equivalent to: partial_sum(qvals.rbegin(), qvals.rend(), qvals.rbegin(), min);
-    qvals = list(accumulate(qvals[::-1], min))[::-1]
+    return list(accumulate(qvals[::-1], min))[::-1]
     
-def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
+def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = True):
     """Returns q-values and the indices of the positive class such that q <= thresh
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
@@ -179,9 +180,8 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     all = zip(scores,labels, range(len(scores)))
     #--- sort descending
     all.sort( key = lambda r: -r[0])
-    qvals = []
     pi0 = 1.
-    getQValues(pi0, all, qvals, skipDecoysPlusOne)
+    qvals = getQValues(pi0, all, skipDecoysPlusOne)
     
     taq = []
     daq = []
@@ -1059,7 +1059,11 @@ def load_pin_return_featureMatrix(filename):
     pepstrings = []
     scoreIndex = _scoreInd # column index of the ranking score used by the search algorithm 
     numRows = 0
-
+    # feature descriptions
+    featureNames = [scoreKey, "Charge", "pepLen"]
+    for k in keys:
+        featureNames.append(k)
+    
     for i, l in enumerate(reader):
         try:
             sid = int(l[sidKey])
@@ -1124,9 +1128,9 @@ def load_pin_return_featureMatrix(filename):
                 pepstrings.append(l["Peptide"][2:-2])
                 numRows += 1
     # Standard-normalize the feature matrix
-    return targets,decoys, pepstrings, preprocessing.scale(np.array(X)), np.array(Y)
+    return targets,decoys, pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames
 
-def findInitDirection(X, Y, thresh):
+def findInitDirection(X, Y, thresh, featureNames):
     l = X.shape
     m = l[1]
     initDirection = -1
@@ -1137,14 +1141,14 @@ def findInitDirection(X, Y, thresh):
             initDirection = i
             numIdentified = len(taq)
 
-        if _debug:
-            print "Direction %d: Could separate %d identifications" % (i, len(taq))
+        if _debug and _verb >= 2:
+            print "Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq))
     return initDirection, numIdentified
 
 def getDecoyIdx(labels, ids):
     return [i for i in ids if labels[i] != 1]
 
-def searchForInitialDirection(keys, X, Y, q):
+def searchForInitialDirection(keys, X, Y, q, featureNames):
     """ Iterate through cross validation training sets and find initial search directions
         Returns the scores for the disjoint bins
     """
@@ -1160,11 +1164,10 @@ def searchForInitialDirection(keys, X, Y, q):
         trainSids = list(set(keys) - set(testSids))
 
         # Find initial direction
-        initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q)
-        print "CV fold %d: could separate %d PSMs in initial direction %d" % (kFold, numIdentified, initDir)
+        initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
         scores[trainSids] = X[trainSids,initDir]
     return scores
-
 
 def discFunc(options, output):
     q = 0.01
@@ -1173,7 +1176,7 @@ def discFunc(options, output):
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
-    target_rows, decoy_rows, pepstrings, X, Y = load_pin_return_featureMatrix(f)
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
 
     # get mapping from rows to spectrum ids
     target_rowsToSids = {}
@@ -1197,16 +1200,20 @@ def discFunc(options, output):
     t_scores = {}
     d_scores = {}
 
-    scores = searchForInitialDirection(keys, X, Y, q)
-    # # Find initial direction
-    # initDir, numIdentified = findInitDirection(X, Y, q)
-    # # Gather scores
-    # scores = np.array([X[i,initDir] for i in keys])
+    initDir = options.initDirection
+    if initDir > -1 and initDir < m:
+        print "Using specified initial direction %d" % (initDir)
+        # Gather scores
+        scores = X[:,initDir]
+        taq, _, _ = calcQ(scores, Y, q, False)
+        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+    else:
+        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
 
     numIdentified = doLda(q, keys, scores, X, Y, 
                           t_scores, d_scores, 
                           target_rowsToSids, decoy_rowsToSids)
-    print "LDA: %d targets" % (numIdentified)
+    print "LDA finished, identified %d targets at q=%.2f" % (numIdentified, q)
 
     fid = open(output, 'w')
     fid.write("Kind\tSid\tPeptide\tScore\n")
@@ -1229,45 +1236,12 @@ def discFunc(options, output):
     fid.close()
     print "Wrote %d PSMs" % counter
 
-def doIter(thresh, keys, scores, X, Y, 
-           t_scores, d_scores, 
-           target_rowsToSids, decoy_rowsToSids):
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
-    # record new scores as we go
-    newScores = np.zeros(scores.shape)
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
-
-        trainSids = list(set(keys) - set(testSids))
-
-        taq, daq, _ = calcQ(scores[trainSids], Y[trainSids], thresh)
-        trainSids = list(set(taq) | set(getDecoyIdx(Y, trainSids)))
-
-        features = X[trainSids]
-        labels = Y[trainSids]
-        clf = lda()
-        clf.fit(features, labels)
-
-        iter_scores = clf.decision_function(X[testSids])
-        for i, score in zip(testSids, iter_scores):
-            newScores[i] = score
-            if Y[i] == 1:
-                sid = target_rowsToSids[i]
-                t_scores[sid] = score
-            else:
-                sid = decoy_rowsToSids[i]
-                d_scores[sid] = score
-
-    scores = newScores
-    return len(taq)
-
 def doLda(thresh, keys, scores, X, Y, 
-           t_scores, d_scores, 
-           target_rowsToSids, decoy_rowsToSids):
+          t_scores, d_scores, 
+          target_rowsToSids, decoy_rowsToSids):
+    """ Perform LDA on CV bins
+    """
+    totalTaq = 0 # total number of estimated true positives at q-value threshold
     # split dataset into thirds for testing/training
     m = len(keys)/3
     # record new scores as we go
@@ -1280,9 +1254,9 @@ def doLda(thresh, keys, scores, X, Y,
 
         trainSids = list(set(keys) - set(testSids))
 
-        taq, daq, _ = calcQ(scores[trainSids], Y[trainSids], thresh)
+        taq, daq, _ = calcQ(scores[trainSids], Y[trainSids], thresh, True)
         # Debugging check
-        if _debug:
+        if _debug and _verb >= 1:
             gd = getDecoyIdx(Y, trainSids)
             print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(trainSids) - len(gd), len(gd), len(taq), len(daq))
 
@@ -1294,6 +1268,9 @@ def doLda(thresh, keys, scores, X, Y,
         clf.fit(features, labels)
 
         iter_scores = clf.decision_function(X[testSids])
+        # Calculate true positives
+        tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
+        totalTaq += len(tp)
 
         if _mergescore:
             u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
@@ -1309,7 +1286,7 @@ def doLda(thresh, keys, scores, X, Y,
                 d_scores[sid] = score
 
     scores = newScores
-    return len(taq)
+    return totalTaq
 
 def discFuncIter(options, output):
     q = 0.01
@@ -1374,13 +1351,12 @@ def discFuncIter(options, output):
 if __name__ == '__main__':
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.5)
-    parser.add_option('--dq', type = 'float', action= 'store', default = 0.5)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--initDirection', type = 'int', action= 'store', default = -1)
+    parser.add_option('--verb', type = 'int', action= 'store', default = -1)
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 500)
     parser.add_option('--pin', type = 'string', action= 'store')
     parser.add_option('--filebase', type = 'string', action= 'store')
-    parser.add_option('--gmm_output', type = 'string', action= 'store')
-    parser.add_option('--cve_output', type = 'string', action= 'store')
     parser.add_option('--alpha', type = 'float', action= 'store', default = 0.0)
     parser.add_option('--l2reg', action = 'store_true', default = False)
     parser.add_option('--onlyNewFeatuers', action = 'store_true', default = False)
@@ -1392,6 +1368,7 @@ if __name__ == '__main__':
     parser.add_option('--disc', action = 'store_true', default = False)
     (options, args) = parser.parse_args()
 
+    _verb=options.verb
     discOutput = '%s_ppProcess.txt' % (options.filebase)
     discFunc(options, discOutput)
     # discFuncIter(options, discOutput)
