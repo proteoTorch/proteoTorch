@@ -89,6 +89,9 @@ def accumulate(iterable, func=operator.add, initial=None):
         total = func(total, element)
         yield total
 
+# def findpi0():
+    
+
 ## This is a reimplementation of
 #   Crux/src/app/AssignConfidenceApplication.cpp::compute_decoy_qvalues_mixmax
 # Which itself was a reimplementation of Uri Keich's code written in R.
@@ -1268,9 +1271,6 @@ def discFunc(options, output):
     n = l[0] # number of instances
     m = l[1] # number of features
 
-    # Assuming, for now, that target-decoy competition is to be conducted, 
-    # i.e., that a concatenated search has not been input
-    # Note: we're not performing TDC right now, add TDC later
     print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
     keys = range(n)
 
@@ -1316,9 +1316,6 @@ def discFuncIter(options, output):
     n = l[0] # number of instances
     m = l[1] # number of features
 
-    # Assuming, for now, that target-decoy competition is to be conducted, 
-    # i.e., that a concatenated search has not been input
-    # Note: we're not performing TDC right now (just mix-max), add TDC later
     print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
     keys = range(n)
 
@@ -1351,21 +1348,14 @@ if __name__ == '__main__':
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--initDirection', type = 'int', action= 'store', default = -1)
     parser.add_option('--verb', type = 'int', action= 'store', default = -1)
-    parser.add_option('--maxIters', type = 'int', action= 'store', default = 500)
+    parser.add_option('--maxIters', type = 'int', action= 'store', default = 10)
     parser.add_option('--pin', type = 'string', action= 'store')
     parser.add_option('--filebase', type = 'string', action= 'store')
-    parser.add_option('--alpha', type = 'float', action= 'store', default = 0.0)
-    parser.add_option('--l2reg', action = 'store_true', default = False)
-    parser.add_option('--onlyNewFeatuers', action = 'store_true', default = False)
-    parser.add_option('--addToPin', action = 'store_true', default = False)
-    parser.add_option('--semi', action = 'store_true', default = False)
-    parser.add_option('--bb', action = 'store_true', default = False)
-    parser.add_option('--armijo', action = 'store_true', default = False)
-    parser.add_option('--inputLrate', action = 'store_true', default = False)
-    parser.add_option('--disc', action = 'store_true', default = False)
+
     (options, args) = parser.parse_args()
 
     _verb=options.verb
     discOutput = '%s_ppProcess.txt' % (options.filebase)
     # discFunc(options, discOutput)
     discFuncIter(options, discOutput)
+    # TODO: add q-value post-processing: mix-max and TDC
