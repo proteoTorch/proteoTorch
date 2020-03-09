@@ -31,7 +31,7 @@ from random import shuffle
 from scipy import linalg, stats
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
-import mixture
+from sklearn import mixture
 
 #########################################################
 ################### Global variables
@@ -52,19 +52,19 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
     scoreInd = _scoreInd
     labelInd = _labelInd
-    # all: list of triples consisting of score, label, and index
-    all = zip(scores,labels, range(len(scores)))
+    # allScores: list of triples consisting of score, label, and index
+    allScores = zip(scores,labels, range(len(scores)))
     #--- sort descending
-    all.sort( key = lambda r: -r[0])
+    allScores.sort(reverse=True)
     pi0 = 1.
-    qvals = getQValues(pi0, all, skipDecoysPlusOne)
+    qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
 
     # Calculate minimum score which achieves q-value thresh
-    u = all[0][scoreInd]
+    u = allScores[0][scoreInd]
     for idx, q in enumerate(qvals):
         if q > thresh:
             break
-        u = all[idx][scoreInd]
+        u = allScores[idx][scoreInd]
 
     # find median decoy score
     dScores = [score for score,l in zip(scores,labels) if l != 1]
@@ -179,12 +179,12 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = True):
     """Returns q-values and the indices of the positive class such that q <= thresh
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-    # all: list of triples consisting of score, label, and index
-    all = zip(scores,labels, range(len(scores)))
+    # allScores: list of triples consisting of score, label, and index
+    allScores = zip(scores,labels, range(len(scores)))
     #--- sort descending
-    all.sort( key = lambda r: -r[0])
+    allScores.sort(reverse=True)
     pi0 = 1.
-    qvals = getQValues(pi0, all, skipDecoysPlusOne)
+    qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
     
     taq = []
     daq = []
@@ -192,71 +192,13 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = True):
         if q > thresh:
             break
         else:
-            curr_label = all[idx][1]
-            curr_og_idx = all[idx][2]
+            curr_label = allScores[idx][1]
+            curr_og_idx = allScores[idx][2]
             if curr_label == 1:
                 taq.append(curr_og_idx)
             else:
                 daq.append(curr_og_idx)
-    return taq,daq, [qvals[i] for _,_,i in all]
-
-# Note: below does not handle ties at all, which becomes very problematic when handling discrete features
-# or p-value scores (where many PSMs have zero or unity scores)
-def calcQOld(scores, labels,
-             thresh = 0.01):
-    """Returns q-values and the indices of the positive class such that q <= thresh
-    """
-    assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-    # all: list of triples consisting of score, label, and index
-    all = zip(scores,labels, range(len(scores)))
-    #--- sort descending
-    all.sort( key = lambda r: -r[0])
-    fdrs = []
-    posTot = 0.0
-    fpTot = 0.0
-    fdr = 0.0
-
-    #--- iterates through scores
-    for item in all:
-        if item[1] == 1: 
-            posTot += 1.0
-        else: 
-            fpTot += 1.0
-    
-        #--- check for zero positives
-        if posTot == 0.0: 
-            fdr = 100.0
-        else: 
-            fdr = fpTot / posTot
-        #--- note the q
-        fdrs.append(fdr)
-
-    qs = []
-    lastQ = 100.0
-    for idx in range(len(fdrs)-1, -1, -1):
-        q = 0.0
-        #--- q can never go up. 
-        if lastQ < fdrs[idx]:
-            q = lastQ
-        else:
-            q = fdrs[idx]
-        lastQ = q
-        qs.append(q)
-    qs.reverse()
-
-    taq = []
-    daq = []
-    for idx, q in enumerate(qs):
-        if q > thresh:
-            break
-        else:
-            curr_label = all[idx][1]
-            curr_og_idx = all[idx][2]
-            if curr_label == 1:
-                taq.append(curr_og_idx)
-            else:
-                daq.append(curr_og_idx)
-    return taq,daq, [qs[i] for _,_,i in all]
+    return taq,daq, [qvals[i] for _,_,i in allScores]
 
 def load_pin_file(filename):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
@@ -1013,7 +955,7 @@ def load_pin_return_dictOfArrs_peptideProphet_db(filename):
     print "Evaluated %d PSMs" % numPeps
     return targets,decoys,t_db,d_db
 
-def load_pin_return_featureMatrix(filename):
+def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
         the spectrum identification number
 
@@ -1033,7 +975,7 @@ def load_pin_return_featureMatrix(filename):
     sidKey = "ScanNr" # note that this typically denotes retention time
 
     maxCharge = 1
-    chargeKeys = set([])
+    chargeKeys = [] # used as a fast hash check when determining charge integer
     # look at score key and charge keys
     scoreKey = ''
     for i in l:
@@ -1041,7 +983,7 @@ def load_pin_return_featureMatrix(filename):
         if m == 'score':
             scoreKey = i
         if m[:-1]=='charge':
-            chargeKeys.add(i)
+            chargeKeys.append(i)
             maxCharge = max(maxCharge, int(m[-1]))
 
     if not scoreKey:
@@ -1063,9 +1005,17 @@ def load_pin_return_featureMatrix(filename):
     scoreIndex = _scoreInd # column index of the ranking score used by the search algorithm 
     numRows = 0
     # feature descriptions
-    featureNames = [scoreKey, "Charge", "pepLen"]
-    for k in keys:
-        featureNames.append(k)
+
+    if not oneHotChargeVector:
+        featureNames = [scoreKey, "Charge", "pepLen"]
+        for k in keys:
+            featureNames.append(k)
+    else:
+        featureNames = [scoreKey]
+        featureNames += chargeKeys
+        featureNames.append("pepLen")
+        for k in keys:
+            featureNames.append(k)
     
     for i, l in enumerate(reader):
         try:
@@ -1098,14 +1048,16 @@ def load_pin_return_featureMatrix(filename):
         el = []
         # el.append(sid)
         el.append(float(l[scoreKey]))
-        el.append(charge)
+        if not oneHotChargeVector:
+            el.append(charge)
+        else:
+            for c in chargeKeys:
+                el.append(int(l[c]))
         el.append(len(l["Peptide"])-4)
         for k in keys:
             el.append(float(l[k]))
 
-        # note: in the below, we can perform target-decoy competition
-        
-        # Note: could be problematic taking the max wrt sid below
+        # Note: remove taking the max wrt sid below
         if kind == 't':
             if sid in targets:
                 featScore = X[targets[sid]][scoreIndex]
@@ -1251,6 +1203,8 @@ def writeOutput(output, Y, pepstrings,
 
 
 def discFunc(options, output):
+    """ Performs LDA using 3 cross-validation bins
+    """
     q = 0.01
     f = options.pin
     # target_rows: dictionary mapping target sids to rows in the feature matrix
@@ -1342,6 +1296,156 @@ def discFuncIter(options, output):
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
 
+def doUnsupervisedGmm_1d(thresh, scores, Y, t_scores, d_scores, 
+                         target_rowsToSids, decoy_rowsToSids):
+    """ Assuming LDA was performed prior to this, or training an unsupervised GMM based on the scores provided in the scores list
+    """
+    # Train Unsupervised GMM
+    clf = mixture.GaussianMixture(n_components=2, covariance_type='diag', init_params = 'random', verbose=2)
+    scores = scores.reshape(len(scores), 1)
+    clf.fit(scores)
+    posterior_scores = clf.predict_proba(scores)
+    # have to figure out which class corresponds to targets
+    tp, _, _ = calcQ(posterior_scores[:,0], Y, thresh, False)
+    taqa = len(tp)
+    tp, _, _ = calcQ(posterior_scores[:,1], Y, thresh, False)
+    taqb = len(tp)
+    target_class_ind = 1
+    print taqa, taqb, posterior_scores.shape
+    if taqa > taqb:
+        target_class_ind = 0
+    for i, score in enumerate(posterior_scores):
+        scores[i] = score[target_class_ind]
+        if Y[i] == 1:
+            sid = target_rowsToSids[i]
+            t_scores[sid] = score[target_class_ind]
+        else:
+            sid = decoy_rowsToSids[i]
+            d_scores[sid] = score[target_class_ind]
+    # Calculate true positives
+    tp, _, _ = calcQ(scores, Y, thresh, False)
+    totalTaq = len(tp)
+    return totalTaq
+
+def doUnsupervisedGmm(thresh, scores, X, Y, t_scores, d_scores, 
+                      target_rowsToSids, decoy_rowsToSids):
+    """ Assuming LDA was performed prior to this, or training an unsupervised GMM based on the scores provided in the scores list
+    """
+    # Train Unsupervised GMM
+    clf = mixture.GaussianMixture(n_components=2, covariance_type='diag', init_params = 'random', verbose=2)
+    clf.fit(X)
+    posterior_scores = clf.predict_proba(X)
+    # have to figure out which class corresponds to targets
+    tp, _, _ = calcQ(posterior_scores[:,0], Y, thresh, False)
+    taqa = len(tp)
+    tp, _, _ = calcQ(posterior_scores[:,1], Y, thresh, False)
+    taqb = len(tp)
+    target_class_ind = 1
+    print taqa, taqb, posterior_scores.shape
+    if taqa > taqb:
+        target_class_ind = 0
+    for i, score in enumerate(posterior_scores):
+        scores[i] = score[target_class_ind]
+        if Y[i] == 1:
+            sid = target_rowsToSids[i]
+            t_scores[sid] = score[target_class_ind]
+        else:
+            sid = decoy_rowsToSids[i]
+            d_scores[sid] = score[target_class_ind]
+    # Calculate true positives
+    tp, _, _ = calcQ(scores, Y, thresh, False)
+    totalTaq = len(tp)
+    return totalTaq
+
+def ldaGmm(options, output):
+    """ Perform LDA followed rescoring using GMM posteriors
+    """
+    q = 0.01
+    f = options.pin
+    # target_rows: dictionary mapping target sids to rows in the feature matrix
+    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
+    # X: standard-normalized feature matrix
+    # Y: binary labels, true denoting a target PSM
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
+    # get mapping from rows to spectrum ids
+    target_rowsToSids = {}
+    decoy_rowsToSids = {}
+    for tr in target_rows:
+        target_rowsToSids[target_rows[tr]] = tr
+    for dr in decoy_rows:
+        decoy_rowsToSids[decoy_rows[dr]] = dr
+    l = X.shape
+    n = l[0] # number of instances
+    m = l[1] # number of features
+
+    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
+    keys = range(n)
+
+    shuffle(keys)
+    t_scores = {}
+    d_scores = {}
+
+    initDir = options.initDirection
+    if initDir > -1 and initDir < m:
+        print "Using specified initial direction %d" % (initDir)
+        # Gather scores
+        scores = X[:,initDir]
+        taq, _, _ = calcQ(scores, Y, q, False)
+        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+    else:
+        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
+
+    # Perform LDA
+    numIdentified = doLda(q, keys, scores, X, Y, 
+                          t_scores, d_scores, 
+                          target_rowsToSids, decoy_rowsToSids)
+    print "LDA: %d targets identified" % (numIdentified)
+
+    # Perform Unsupervised GMM learning over LDA scores, rescore PSMs using 
+    # resulting posterior
+    numIdentified = doUnsupervisedGmm_1d(q, scores, Y, 
+                                         t_scores, d_scores, 
+                                         target_rowsToSids, decoy_rowsToSids)
+    print "GMM: %d targets identified" % (numIdentified)
+
+    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
+                decoy_rowsToSids, d_scores)
+
+def gmm(options, output):
+    """ Train unsupervised GMM and rescore PSMs using posterior
+    """
+    q = 0.01
+    f = options.pin
+    # target_rows: dictionary mapping target sids to rows in the feature matrix
+    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
+    # X: standard-normalized feature matrix
+    # Y: binary labels, true denoting a target PSM
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
+    # get mapping from rows to spectrum ids
+    target_rowsToSids = {}
+    decoy_rowsToSids = {}
+    for tr in target_rows:
+        target_rowsToSids[target_rows[tr]] = tr
+    for dr in decoy_rows:
+        decoy_rowsToSids[decoy_rows[dr]] = dr
+    l = X.shape
+    n = l[0] # number of instances
+    m = l[1] # number of features
+
+    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
+    t_scores = {}
+    d_scores = {}
+    scores = np.zeros(Y.shape)
+    # Perform Unsupervised GMM learning over features, rescore PSMs using 
+    # resulting posterior
+    numIdentified = doUnsupervisedGmm(q, scores, X, Y, 
+                                      t_scores, d_scores, 
+                                      target_rowsToSids, decoy_rowsToSids)
+    print "GMM: %d targets identified" % (numIdentified)
+
+    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
+                decoy_rowsToSids, d_scores)
+
 if __name__ == '__main__':
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.5)
@@ -1355,7 +1459,19 @@ if __name__ == '__main__':
     (options, args) = parser.parse_args()
 
     _verb=options.verb
-    discOutput = '%s_ppProcess.txt' % (options.filebase)
-    # discFunc(options, discOutput)
-    discFuncIter(options, discOutput)
+    discOutput = '%s.txt' % (options.filebase)
+    # Recipes:
+
+    # Single step of LDA
+    discFunc(options, discOutput)
+
+    # Iterative LDA
+    # discFuncIter(options, discOutput)
+
+    # Single step of LDA followed by GMM posterior scoring
+    # ldaGmm(options, discOutput)
+
+    # Unsupervised learning of GMMs
+    # gmm(options, discOutput)
     # TODO: add q-value post-processing: mix-max and TDC
+    # TODO: write to a better output file format
