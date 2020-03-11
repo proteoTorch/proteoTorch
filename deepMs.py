@@ -29,7 +29,6 @@ import util.iterables
 import struct
 import array
 
-from random import shuffle
 from scipy import linalg, stats
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
@@ -69,8 +68,10 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
         u = allScores[idx][scoreInd]
 
     # find median decoy score
-    dScores = [score for score,l in zip(scores,labels) if l != 1]
-    d = sorted(dScores)[len(dScores) / 2]
+    d = allScores[0][scoreInd] + 1.
+    dScores = sorted([score for score,l in zip(scores,labels) if l != 1])
+    if len(dScores):
+        d = dScores[max(0,len(dScores) / 2)]
     return u, d
 
 # From itertools, https://docs.python.org/3/library/itertools.html#itertools.accumulate
@@ -1140,6 +1141,9 @@ def doMergeScores(thresh, keys, scores, Y,
             testSids = keys[kFold * m : ]
             
         u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+        diff = u - d
+        if diff <= 0.:
+            diff = 1.
         for ts in testSids:
             newScores[ts] = (scores[ts] - u) / (u-d)
             if Y[ts] == 1:
@@ -1245,7 +1249,8 @@ def discFunc(options, output):
     print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
     keys = range(n)
 
-    shuffle(keys)
+    
+    random.shuffle(keys)
     t_scores = {}
     d_scores = {}
 
@@ -1293,7 +1298,7 @@ def discFuncIter(options, output):
     print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
     keys = range(n)
 
-    shuffle(keys)
+    random.shuffle(keys)
     t_scores = {}
     d_scores = {}
 
@@ -1407,7 +1412,7 @@ def ldaGmm(options, output):
     print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
     keys = range(n)
 
-    shuffle(keys)
+    random.shuffle(keys)
     t_scores = {}
     d_scores = {}
 
@@ -1546,6 +1551,18 @@ def doSvm(thresh, keys, scores, X, Y,
 
     return newScores, totalTaq
 
+def calculateTargetDecoyRatio(Y):
+    # calculate target-decoy ratio for the given training/testing set with labels Y
+    numPos = 0
+    numNeg = 0
+    for y in Y:
+        if y==1:
+            numPos+=1
+        else:
+            numNeg+=1
+
+    return float(numPos) / max(1., float(numNeg))
+
 def svmIter(options, output):
     q = 0.01
     f = options.pin
@@ -1566,21 +1583,12 @@ def svmIter(options, output):
     n = l[0] # number of instances
     m = l[1] # number of features
 
-    # calculate target-decoy ratio for the training set
-    numPos = 0
-    numNeg = 0
-    for y in Y:
-        if y==1:
-            numPos+=1
-        else:
-            numNeg+=1
-
-    targetDecoyRatio = float(numPos) / max(1., float(numNeg))
+    targetDecoyRatio = calculateTargetDecoyRatio(Y)
 
     print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (len(target_rows), len(decoy_rows), l[1], targetDecoyRatio)
     keys = range(n)
 
-    shuffle(keys)
+    random.shuffle(keys)
     t_scores = {}
     d_scores = {}
 
@@ -1600,15 +1608,15 @@ def svmIter(options, output):
                                       targetDecoyRatio)
         print "iter %d: %d targets" % (i, numIdentified)
 
-    taq, _, _ = calcQ(scores, Y, q, False)
-    print "Could identify %d targets" % (len(taq))
+    # taq, _, _ = calcQ(scores, Y, q, False)
+    # print "Could identify %d targets" % (len(taq))
     if _mergescore:
         scores = doMergeScores(q, keys, scores, Y, 
                                t_scores, d_scores, 
                                target_rowsToSids, decoy_rowsToSids)
 
     taq, _, _ = calcQ(scores, Y, q, True)
-    print "Could identify %d targets, %d" % (len(taq), len(scores))
+    print "Could identify %d targets" % (len(taq))
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
 
@@ -1621,8 +1629,15 @@ if __name__ == '__main__':
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 10)
     parser.add_option('--pin', type = 'string', action= 'store')
     parser.add_option('--filebase', type = 'string', action= 'store')
+    parser.add_option('--seed', type = 'int', action= 'store', default = 1)
 
     (options, args) = parser.parse_args()
+
+    # Seed random number generator.  To make shuffling nondeterministic, input seed <= -1
+    if options.seed <= -1:
+        random.seed()
+    else:
+        random.seed(options.seed)
 
     _verb=options.verb
     discOutput = '%s.txt' % (options.filebase)
