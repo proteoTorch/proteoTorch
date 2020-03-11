@@ -1126,9 +1126,31 @@ def searchForInitialDirection(keys, X, Y, q, featureNames):
         scores[trainSids] = X[trainSids,initDir]
     return scores
 
-def doLda(thresh, keys, scores, X, Y, 
-          t_scores, d_scores, 
-          target_rowsToSids, decoy_rowsToSids):
+def doMergeScores(thresh, keys, scores, Y, 
+                  t_scores, d_scores, 
+                  target_rowsToSids, decoy_rowsToSids):
+    # split dataset into thirds for testing/training
+    m = len(keys)/3
+    # record new scores as we go
+    newScores = np.zeros(scores.shape)
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+            
+        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+        for ts in testSids:
+            newScores[ts] = (scores[ts] - u) / (u-d)
+            if Y[ts] == 1:
+                sid = target_rowsToSids[ts]
+                t_scores[sid] = newScores[ts]
+            else:
+                sid = decoy_rowsToSids[ts]
+                d_scores[sid] = newScores[ts]
+    return newScores
+
+def doLda(thresh, keys, scores, X, Y):
     """ Perform LDA on CV bins
     """
     totalTaq = 0 # total number of estimated true positives at q-value threshold
@@ -1162,18 +1184,12 @@ def doLda(thresh, keys, scores, X, Y,
         tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
         totalTaq += len(tp)
 
-        if _mergescore:
-            u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
-            iter_scores = (iter_scores - u) / (u-d)
+        # if _mergescore:
+        #     u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
+        #     iter_scores = (iter_scores - u) / (u-d)
 
         for i, score in zip(testSids, iter_scores):
             newScores[i] = score
-            if Y[i] == 1:
-                sid = target_rowsToSids[i]
-                t_scores[sid] = score
-            else:
-                sid = decoy_rowsToSids[i]
-                d_scores[sid] = score
 
     return newScores, totalTaq
 
@@ -1243,9 +1259,12 @@ def discFunc(options, output):
     else:
         scores = searchForInitialDirection(keys, X, Y, q, featureNames)
 
-    scores, numIdentified = doLda(q, keys, scores, X, Y, 
-                                  t_scores, d_scores, 
-                                  target_rowsToSids, decoy_rowsToSids)
+    scores, numIdentified = doLda(q, keys, scores, X, Y)
+    if _mergescore:
+        scores = doMergeScores(q, keys, scores, Y, 
+                               t_scores, d_scores, 
+                               target_rowsToSids, decoy_rowsToSids)
+        
     print "LDA finished, identified %d targets at q=%.2f" % (numIdentified, q)
 
     writeOutput(output, Y, pepstrings,
@@ -1289,10 +1308,14 @@ def discFuncIter(options, output):
         scores = searchForInitialDirection(keys, X, Y, q, featureNames)
 
     for i in range(10):
-        scores, numIdentified = doLda(q, keys, scores, X, Y, 
-                                      t_scores, d_scores, 
-                                      target_rowsToSids, decoy_rowsToSids)
+        scores, numIdentified = doLda(q, keys, scores, X, Y)
         print "iter %d: %d targets" % (i, numIdentified)
+
+    if _mergescore:
+        scores = doMergeScores(q, keys, scores, Y, 
+                               t_scores, d_scores, 
+                               target_rowsToSids, decoy_rowsToSids)
+
 
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
@@ -1399,10 +1422,12 @@ def ldaGmm(options, output):
         scores = searchForInitialDirection(keys, X, Y, q, featureNames)
 
     # Perform LDA
-    scores, numIdentified = doLda(q, keys, scores, X, Y, 
-                                  t_scores, d_scores, 
-                                  target_rowsToSids, decoy_rowsToSids)
+    scores, numIdentified = doLda(q, keys, scores, X, Y)
     print "LDA: %d targets identified" % (numIdentified)
+    if _mergescore:
+        scores = doMergeScores(q, keys, scores, Y, 
+                               t_scores, d_scores, 
+                               target_rowsToSids, decoy_rowsToSids)
 
     # Perform Unsupervised GMM learning over LDA scores, rescore PSMs using 
     # resulting posterior
@@ -1449,9 +1474,7 @@ def gmm(options, output):
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
 
-def doSvm(thresh, keys, scores, X, Y, 
-          t_scores, d_scores, 
-          target_rowsToSids, decoy_rowsToSids,
+def doSvm(thresh, keys, scores, X, Y,
           targetDecoyRatio):
     """ Train and test SVM on CV bins
     """
@@ -1514,18 +1537,12 @@ def doSvm(thresh, keys, scores, X, Y,
         tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
         totalTaq += len(tp)
 
-        if _mergescore:
-            u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
-            iter_scores = (iter_scores - u) / (u-d)
+        # if _mergescore:
+        #     u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
+        #     iter_scores = (iter_scores - u) / (u-d)
 
         for i, score in zip(testSids, iter_scores):
             newScores[i] = score
-            if Y[i] == 1:
-                sid = target_rowsToSids[i]
-                t_scores[sid] = score
-            else:
-                sid = decoy_rowsToSids[i]
-                d_scores[sid] = score
 
     return newScores, totalTaq
 
@@ -1579,12 +1596,19 @@ def svmIter(options, output):
     
 
     for i in range(options.maxIters):
-        scores, numIdentified = doSvm(q, keys, scores, X, Y, 
-                                      t_scores, d_scores, 
-                                      target_rowsToSids, decoy_rowsToSids, 
+        scores, numIdentified = doSvm(q, keys, scores, X, Y,
                                       targetDecoyRatio)
         print "iter %d: %d targets" % (i, numIdentified)
 
+    taq, _, _ = calcQ(scores, Y, q, False)
+    print "Could identify %d targets" % (len(taq))
+    if _mergescore:
+        scores = doMergeScores(q, keys, scores, Y, 
+                               t_scores, d_scores, 
+                               target_rowsToSids, decoy_rowsToSids)
+
+    taq, _, _ = calcQ(scores, Y, q, True)
+    print "Could identify %d targets, %d" % (len(taq), len(scores))
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
 
