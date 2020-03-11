@@ -20,6 +20,8 @@ import cPickle as pickle
 
 import operator
 from sklearn.utils import check_random_state
+from copy import deepcopy
+from sklearn.svm import LinearSVC as svc
 from sklearn import preprocessing
 from pprint import pprint
 import util.args
@@ -1173,8 +1175,7 @@ def doLda(thresh, keys, scores, X, Y,
                 sid = decoy_rowsToSids[i]
                 d_scores[sid] = score
 
-    scores = newScores
-    return totalTaq
+    return newScores, totalTaq
 
 def writeOutput(output, Y, pepstrings,
                 target_rowsToSids, t_scores,
@@ -1242,9 +1243,9 @@ def discFunc(options, output):
     else:
         scores = searchForInitialDirection(keys, X, Y, q, featureNames)
 
-    numIdentified = doLda(q, keys, scores, X, Y, 
-                          t_scores, d_scores, 
-                          target_rowsToSids, decoy_rowsToSids)
+    scores, numIdentified = doLda(q, keys, scores, X, Y, 
+                                  t_scores, d_scores, 
+                                  target_rowsToSids, decoy_rowsToSids)
     print "LDA finished, identified %d targets at q=%.2f" % (numIdentified, q)
 
     writeOutput(output, Y, pepstrings,
@@ -1288,9 +1289,9 @@ def discFuncIter(options, output):
         scores = searchForInitialDirection(keys, X, Y, q, featureNames)
 
     for i in range(10):
-        numIdentified = doLda(q, keys, scores, X, Y, 
-                              t_scores, d_scores, 
-                              target_rowsToSids, decoy_rowsToSids)
+        scores, numIdentified = doLda(q, keys, scores, X, Y, 
+                                      t_scores, d_scores, 
+                                      target_rowsToSids, decoy_rowsToSids)
         print "iter %d: %d targets" % (i, numIdentified)
 
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
@@ -1303,6 +1304,7 @@ def doUnsupervisedGmm_1d(thresh, scores, Y, t_scores, d_scores,
     # Train Unsupervised GMM
     clf = mixture.GaussianMixture(n_components=2, covariance_type='diag', init_params = 'random', verbose=2)
     scores = scores.reshape(len(scores), 1)
+    newScores = np.zeros(shape(scores))
     clf.fit(scores)
     posterior_scores = clf.predict_proba(scores)
     # have to figure out which class corresponds to targets
@@ -1315,7 +1317,7 @@ def doUnsupervisedGmm_1d(thresh, scores, Y, t_scores, d_scores,
     if taqa > taqb:
         target_class_ind = 0
     for i, score in enumerate(posterior_scores):
-        scores[i] = score[target_class_ind]
+        newScores[i] = score[target_class_ind]
         if Y[i] == 1:
             sid = target_rowsToSids[i]
             t_scores[sid] = score[target_class_ind]
@@ -1325,12 +1327,13 @@ def doUnsupervisedGmm_1d(thresh, scores, Y, t_scores, d_scores,
     # Calculate true positives
     tp, _, _ = calcQ(scores, Y, thresh, False)
     totalTaq = len(tp)
-    return totalTaq
+    return newScores, totalTaq
 
 def doUnsupervisedGmm(thresh, scores, X, Y, t_scores, d_scores, 
                       target_rowsToSids, decoy_rowsToSids):
     """ Assuming LDA was performed prior to this, or training an unsupervised GMM based on the scores provided in the scores list
     """
+    newScores = np.zeros(shape(scores))
     # Train Unsupervised GMM
     clf = mixture.GaussianMixture(n_components=2, covariance_type='diag', init_params = 'random', verbose=2)
     clf.fit(X)
@@ -1345,7 +1348,7 @@ def doUnsupervisedGmm(thresh, scores, X, Y, t_scores, d_scores,
     if taqa > taqb:
         target_class_ind = 0
     for i, score in enumerate(posterior_scores):
-        scores[i] = score[target_class_ind]
+        newScores[i] = score[target_class_ind]
         if Y[i] == 1:
             sid = target_rowsToSids[i]
             t_scores[sid] = score[target_class_ind]
@@ -1355,7 +1358,7 @@ def doUnsupervisedGmm(thresh, scores, X, Y, t_scores, d_scores,
     # Calculate true positives
     tp, _, _ = calcQ(scores, Y, thresh, False)
     totalTaq = len(tp)
-    return totalTaq
+    return newScores, totalTaq
 
 def ldaGmm(options, output):
     """ Perform LDA followed rescoring using GMM posteriors
@@ -1396,16 +1399,16 @@ def ldaGmm(options, output):
         scores = searchForInitialDirection(keys, X, Y, q, featureNames)
 
     # Perform LDA
-    numIdentified = doLda(q, keys, scores, X, Y, 
-                          t_scores, d_scores, 
-                          target_rowsToSids, decoy_rowsToSids)
+    scores, numIdentified = doLda(q, keys, scores, X, Y, 
+                                  t_scores, d_scores, 
+                                  target_rowsToSids, decoy_rowsToSids)
     print "LDA: %d targets identified" % (numIdentified)
 
     # Perform Unsupervised GMM learning over LDA scores, rescore PSMs using 
     # resulting posterior
-    numIdentified = doUnsupervisedGmm_1d(q, scores, Y, 
-                                         t_scores, d_scores, 
-                                         target_rowsToSids, decoy_rowsToSids)
+    scores, numIdentified = doUnsupervisedGmm_1d(q, scores, Y, 
+                                                 t_scores, d_scores, 
+                                                 target_rowsToSids, decoy_rowsToSids)
     print "GMM: %d targets identified" % (numIdentified)
 
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
@@ -1438,10 +1441,149 @@ def gmm(options, output):
     scores = np.zeros(Y.shape)
     # Perform Unsupervised GMM learning over features, rescore PSMs using 
     # resulting posterior
-    numIdentified = doUnsupervisedGmm(q, scores, X, Y, 
-                                      t_scores, d_scores, 
-                                      target_rowsToSids, decoy_rowsToSids)
+    scores, numIdentified = doUnsupervisedGmm(q, scores, X, Y, 
+                                              t_scores, d_scores, 
+                                              target_rowsToSids, decoy_rowsToSids)
     print "GMM: %d targets identified" % (numIdentified)
+
+    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
+                decoy_rowsToSids, d_scores)
+
+def doSvm(thresh, keys, scores, X, Y, 
+          t_scores, d_scores, 
+          target_rowsToSids, decoy_rowsToSids,
+          targetDecoyRatio):
+    """ Train and test SVM on CV bins
+    """
+    totalTaq = 0 # total number of estimated true positives at q-value threshold
+    # split dataset into thirds for testing/training
+    m = len(keys)/3
+    # record new scores as we go
+    newScores = np.zeros(scores.shape)
+    # C for positive and negative classes
+    cposes = [10., 1., 0.1]
+    cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
+
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+
+        cvBinSids = list( set(keys) - set(testSids) )
+        validateSids = cvBinSids
+
+        # Find training set using q-value analysis
+        taq, daq, _ = calcQ(scores[cvBinSids], Y[cvBinSids], thresh, True)
+        gd = getDecoyIdx(Y, cvBinSids)
+        # Debugging check
+        if _debug and _verb >= 1:
+            print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(trainSids) - len(gd), len(gd), len(taq), len(daq))
+
+        trainSids = list(set(taq) | set(gd))
+
+        features = X[trainSids]
+        labels = Y[trainSids]
+        bestTaq = -1
+        bestCp = cposes[0] * 0.5
+        bestCn = cfracs[0] * bestCp
+        bestClf = []
+        alpha = 0.5
+        # Find cpos and cneg
+        for cpos in cposes:
+            for cfrac in cfracs:
+                cneg = cfrac*cpos
+                classWeight = {1: alpha * cpos, -1: alpha * cneg}
+                clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-2)
+                clf.fit(features, labels)
+                validation_scores = clf.decision_function(X[validateSids])
+                # Calculate true positives
+                tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, False)
+                currentTaq = len(tp)
+                if _debug and _verb >= 1:
+                    print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
+                if currentTaq > bestTaq:
+                    bestTaq = currentTaq
+                    bestCp = cpos * alpha
+                    bestCn = cneg * alpha
+                    bestClf = deepcopy(clf)
+
+        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
+        iter_scores = bestClf.decision_function(X[testSids])
+        # Calculate true positives
+        tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
+        totalTaq += len(tp)
+
+        if _mergescore:
+            u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
+            iter_scores = (iter_scores - u) / (u-d)
+
+        for i, score in zip(testSids, iter_scores):
+            newScores[i] = score
+            if Y[i] == 1:
+                sid = target_rowsToSids[i]
+                t_scores[sid] = score
+            else:
+                sid = decoy_rowsToSids[i]
+                d_scores[sid] = score
+
+    return newScores, totalTaq
+
+def svmIter(options, output):
+    q = 0.01
+    f = options.pin
+    # target_rows: dictionary mapping target sids to rows in the feature matrix
+    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
+    # X: standard-normalized feature matrix
+    # Y: binary labels, true denoting a target PSM
+    oneHotChargeVector = True
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f, oneHotChargeVector)
+    # get mapping from rows to spectrum ids
+    target_rowsToSids = {}
+    decoy_rowsToSids = {}
+    for tr in target_rows:
+        target_rowsToSids[target_rows[tr]] = tr
+    for dr in decoy_rows:
+        decoy_rowsToSids[decoy_rows[dr]] = dr
+    l = X.shape
+    n = l[0] # number of instances
+    m = l[1] # number of features
+
+    # calculate target-decoy ratio for the training set
+    numPos = 0
+    numNeg = 0
+    for y in Y:
+        if y==1:
+            numPos+=1
+        else:
+            numNeg+=1
+
+    targetDecoyRatio = float(numPos) / max(1., float(numNeg))
+
+    print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (len(target_rows), len(decoy_rows), l[1], targetDecoyRatio)
+    keys = range(n)
+
+    shuffle(keys)
+    t_scores = {}
+    d_scores = {}
+
+    initDir = options.initDirection
+    if initDir > -1 and initDir < m:
+        print "Using specified initial direction %d" % (initDir)
+        # Gather scores
+        scores = X[:,initDir]
+        taq, _, _ = calcQ(scores, Y, q, False)
+        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+    else:
+        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
+    
+
+    for i in range(options.maxIters):
+        scores, numIdentified = doSvm(q, keys, scores, X, Y, 
+                                      t_scores, d_scores, 
+                                      target_rowsToSids, decoy_rowsToSids, 
+                                      targetDecoyRatio)
+        print "iter %d: %d targets" % (i, numIdentified)
 
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
@@ -1463,7 +1605,7 @@ if __name__ == '__main__':
     # Recipes:
 
     # Single step of LDA
-    discFunc(options, discOutput)
+    # discFunc(options, discOutput)
 
     # Iterative LDA
     # discFuncIter(options, discOutput)
@@ -1475,3 +1617,5 @@ if __name__ == '__main__':
     # gmm(options, discOutput)
     # TODO: add q-value post-processing: mix-max and TDC
     # TODO: write to a better output file format
+
+    svmIter(options, discOutput)
