@@ -1596,7 +1596,8 @@ def doSvmLin(thresh, keys, scores, X, Y,
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []
-    # testScores = np.zeros(Y.shape)
+    clfs = []
+
     # C for positive and negative classes
     cposes = [10., 1., 0.1]
     cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
@@ -1646,10 +1647,11 @@ def doSvmLin(thresh, keys, scores, X, Y,
                     bestClf = deepcopy(clf)
 
         newScores.append(topScores)
+        clfs.append(bestClf)
         print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
         estTaq += bestTaq
     estTaq /= 2
-    return newScores, estTaq, clf
+    return newScores, estTaq, clfs
 
 def calculateTargetDecoyRatio(Y):
     # calculate target-decoy ratio for the given training/testing set with labels Y
@@ -1663,7 +1665,7 @@ def calculateTargetDecoyRatio(Y):
 
     return float(numPos) / max(1., float(numNeg))
 
-def doTestSvm(thresh, keys, X, Y, w):
+def doTestSvm(thresh, keys, X, Y, ws):
     m = len(keys)/3
     testScores = np.zeros(Y.shape)
     totalTaq = 0
@@ -1672,7 +1674,7 @@ def doTestSvm(thresh, keys, X, Y, w):
             testSids = keys[kFold * m : (kFold+1) * m]
         else:
             testSids = keys[kFold * m : ]
-
+        w = ws[kFold]
         testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
         # Calculate true positives
         tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
@@ -1722,12 +1724,12 @@ def svmIter(options, output):
 
     print "Initially could separate %d identifications" % ( initTaq / 2 )
     for i in range(options.maxIters):
-        scores, numIdentified, w = doSvmLin(q, keys, scores, X, Y,
+        scores, numIdentified, ws = doSvmLin(q, keys, scores, X, Y,
                                             targetDecoyRatio)
         print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
     
     # Calculate test scores
-    testScores, numIdentified = doTestSvm(q, keys, X, Y, w)
+    testScores, numIdentified = doTestSvm(q, keys, X, Y, ws)
     print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
     if _mergescore:
         scores = doMergeScores(q, keys, testScores, Y, 
@@ -1738,6 +1740,36 @@ def svmIter(options, output):
     print "Could identify %d targets" % (len(taq))
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
+
+def doSvmGridSearch(features, labels, tron = True):
+    bestTaq = -1.
+    bestCp = 1.
+    bestCn = 1.
+    bestClf = []
+    alpha = 1.
+    # Find cpos and cneg
+    for cpos in cposes:
+        for cfrac in cfracs:
+            cneg = cfrac*cpos
+            if not tron:
+                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                validation_scores = np.dot(X[validateSids], clf[:-1]) + clf[-1]
+            else:
+                clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-20)
+                clf.fit(features, labels)
+                validation_scores = clf.decision_function(X[validateSids])
+            tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, True)
+            currentTaq = len(tp)
+            if _debug and _verb > 1:
+                print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
+            if currentTaq > bestTaq:
+                topScores = validation_scores[:]
+                bestTaq = currentTaq
+                bestCp = cpos * alpha
+                bestCn = cneg * alpha
+                bestClf = deepcopy(clf)
+
+    return topScores, bestTaq, bestClf
 
 def doIter(thresh, keys, scores, X, Y,
            targetDecoyRatio, method = 0):
@@ -1752,7 +1784,8 @@ def doIter(thresh, keys, scores, X, Y,
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []
-    # testScores = np.zeros(Y.shape)
+    clf = [] # classifiers
+
     # C for positive and negative classes
     cposes = [10., 1., 0.1]
     cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
@@ -1777,35 +1810,16 @@ def doIter(thresh, keys, scores, X, Y,
 
         features = X[trainSids]
         labels = Y[trainSids]
-        bestTaq = -1.
-        bestCp = 1.
-        bestCn = 1.
-        bestClf = []
-        alpha = 1.
-        # Find cpos and cneg
-        for cpos in cposes:
-            for cfrac in cfracs:
-                cneg = cfrac*cpos
-                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
-                validation_scores = np.dot(X[validateSids], clf[:-1]) + clf[-1]
-                tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, True)
-                currentTaq = len(tp)
-                if _debug and _verb > 1:
-                    print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
-                # if _debug and _verb >= 1:
-                #     print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
-                if currentTaq > bestTaq:
-                    topScores = validation_scores[:]
-                    bestTaq = currentTaq
-                    bestCp = cpos * alpha
-                    bestCn = cneg * alpha
-                    bestClf = deepcopy(clf)
-
+        if method > 0:
+            if method==1:
+                tron = True
+            topScores, bestTaq, bestClf = doSvmGridSearch(features, labels, tron)
         newScores.append(topScores)
+        clfs.append(bestClf)
         print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
         estTaq += bestTaq
     estTaq /= 2
-    return newScores, estTaq, clf
+    return newScores, estTaq, bestClf
 
 if __name__ == '__main__':
     parser = optparse.OptionParser()
