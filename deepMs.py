@@ -1140,7 +1140,6 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
         Returns the scores for the disjoint bins
     """
     initTaq = 0.
-    # scores = np.zeros(Y.shape)
     scores = []
     # split dataset into thirds for testing/training
     m = len(keys)/3
@@ -1597,7 +1596,7 @@ def doSvmLin(thresh, keys, scores, X, Y,
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []
-    testScores = np.zeros(Y.shape)
+    # testScores = np.zeros(Y.shape)
     # C for positive and negative classes
     cposes = [10., 1., 0.1]
     cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
@@ -1623,8 +1622,8 @@ def doSvmLin(thresh, keys, scores, X, Y,
         features = X[trainSids]
         labels = Y[trainSids]
         bestTaq = -1.
-        bestCp = cposes[0] * 0.5
-        bestCn = cfracs[0] * bestCp
+        bestCp = 1.
+        bestCn = 1.
         bestClf = []
         alpha = 1.
         # Find cpos and cneg
@@ -1640,7 +1639,7 @@ def doSvmLin(thresh, keys, scores, X, Y,
                 # if _debug and _verb >= 1:
                 #     print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
                 if currentTaq > bestTaq:
-                    topScores = validation_scores
+                    topScores = validation_scores[:]
                     bestTaq = currentTaq
                     bestCp = cpos * alpha
                     bestCn = cneg * alpha
@@ -1649,15 +1648,7 @@ def doSvmLin(thresh, keys, scores, X, Y,
         newScores.append(topScores)
         print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
         estTaq += bestTaq
-        # iter_scores = np.dot(X[testSids], bestClf[:-1]) + bestClf[-1]
-        # # Calculate true positives
-        # tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
-        # totalTaq += len(tp)
-
-        # for i, score in zip(testSids, iter_scores):
-        #     testScores[i] = score
     estTaq /= 2
-    # print "Estimated %d targets at q <= %f" % (estTaq, thresh)
     return newScores, estTaq, clf
 
 def calculateTargetDecoyRatio(Y):
@@ -1747,6 +1738,74 @@ def svmIter(options, output):
     print "Could identify %d targets" % (len(taq))
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
+
+def doIter(thresh, keys, scores, X, Y,
+           targetDecoyRatio, method = 0):
+    """ Train a classifier on CV bins.
+        Method 0: LDA
+        Method 1: SVM, solver TRON
+        Method 2: SVM, solver SVMLIN
+    """
+    totalTaq = 0 # total number of estimated true positives at q-value threshold
+    # split dataset into thirds for testing/training
+    m = len(keys)/3
+    # record new scores as we go
+    # newScores = np.zeros(scores.shape)
+    newScores = []
+    # testScores = np.zeros(Y.shape)
+    # C for positive and negative classes
+    cposes = [10., 1., 0.1]
+    cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
+    estTaq = 0
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+
+        cvBinSids = list( set(keys) - set(testSids) )
+        validateSids = cvBinSids
+
+        # Find training set using q-value analysis
+        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
+        gd = getDecoyIdx(Y, cvBinSids)
+        # Debugging check
+        if _debug: #  and _verb >= 1:
+            print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq))
+
+        trainSids = list(set(taq) | set(gd))
+
+        features = X[trainSids]
+        labels = Y[trainSids]
+        bestTaq = -1.
+        bestCp = 1.
+        bestCn = 1.
+        bestClf = []
+        alpha = 1.
+        # Find cpos and cneg
+        for cpos in cposes:
+            for cfrac in cfracs:
+                cneg = cfrac*cpos
+                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                validation_scores = np.dot(X[validateSids], clf[:-1]) + clf[-1]
+                tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, True)
+                currentTaq = len(tp)
+                if _debug and _verb > 1:
+                    print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
+                # if _debug and _verb >= 1:
+                #     print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
+                if currentTaq > bestTaq:
+                    topScores = validation_scores[:]
+                    bestTaq = currentTaq
+                    bestCp = cpos * alpha
+                    bestCn = cneg * alpha
+                    bestClf = deepcopy(clf)
+
+        newScores.append(topScores)
+        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
+        estTaq += bestTaq
+    estTaq /= 2
+    return newScores, estTaq, clf
 
 if __name__ == '__main__':
     parser = optparse.OptionParser()
