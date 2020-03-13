@@ -33,14 +33,16 @@ from scipy import linalg, stats
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from sklearn import mixture
+from svmlin import svmlin
 
 #########################################################
 ################### Global variables
 #########################################################
 _debug=True
-_verb=1
+_verb=2
 _mergescore=True
 _includeNegativesInResult=True
+_standardNorm=True
 # General assumed iterators for lists of score tuples
 _scoreInd=0
 _labelInd=1
@@ -1086,7 +1088,11 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                 pepstrings.append(l["Peptide"][2:-2])
                 numRows += 1
     # Standard-normalize the feature matrix
-    return targets,decoys, pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames
+    if _standardNorm:
+        return targets,decoys, pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames
+    else:
+        min_max_scaler = preprocessing.MinMaxScaler()
+        return targets,decoys, pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames
 
 def findInitDirection(X, Y, thresh, featureNames):
     l = X.shape
@@ -1110,6 +1116,7 @@ def searchForInitialDirection(keys, X, Y, q, featureNames):
     """ Iterate through cross validation training sets and find initial search directions
         Returns the scores for the disjoint bins
     """
+    initTaq = 0.
     scores = np.zeros(Y.shape)
     # split dataset into thirds for testing/training
     m = len(keys)/3
@@ -1123,9 +1130,35 @@ def searchForInitialDirection(keys, X, Y, q, featureNames):
 
         # Find initial direction
         initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+        initTaq += numIdentified
         print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
         scores[trainSids] = X[trainSids,initDir]
-    return scores
+    return scores, initTaq
+
+def searchForInitialDirection_split(keys, X, Y, q, featureNames):
+    """ Iterate through cross validation training sets and find initial search directions
+        Returns the scores for the disjoint bins
+    """
+    initTaq = 0.
+    # scores = np.zeros(Y.shape)
+    scores = []
+    # split dataset into thirds for testing/training
+    m = len(keys)/3
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+
+        trainSids = list(set(keys) - set(testSids))
+
+        # Find initial direction
+        initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+        initTaq += numIdentified
+        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+        # scores[trainSids] = X[trainSids,initDir]
+        scores.append(X[trainSids,initDir])
+    return scores, initTaq
 
 def doMergeScores(thresh, keys, scores, Y, 
                   t_scores, d_scores, 
@@ -1254,6 +1287,7 @@ def discFunc(options, output):
     t_scores = {}
     d_scores = {}
 
+    initTaq = 0.
     initDir = options.initDirection
     if initDir > -1 and initDir < m:
         print "Using specified initial direction %d" % (initDir)
@@ -1261,9 +1295,11 @@ def discFunc(options, output):
         scores = X[:,initDir]
         taq, _, _ = calcQ(scores, Y, q, False)
         print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+        initTaq += len(taq)
     else:
-        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
+        scores, initTaq = searchForInitialDirection(keys, X, Y, q, featureNames)
 
+    print "Initially could separate %d identifications" % (initTaq) 
     scores, numIdentified = doLda(q, keys, scores, X, Y)
     if _mergescore:
         scores = doMergeScores(q, keys, scores, Y, 
@@ -1310,7 +1346,7 @@ def discFuncIter(options, output):
         taq, _, _ = calcQ(scores, Y, q, False)
         print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
     else:
-        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
+        scores, initTaq = searchForInitialDirection(keys, X, Y, q, featureNames)
 
     for i in range(10):
         scores, numIdentified = doLda(q, keys, scores, X, Y)
@@ -1424,7 +1460,7 @@ def ldaGmm(options, output):
         taq, _, _ = calcQ(scores, Y, q, False)
         print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
     else:
-        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
+        scores, initTaq = searchForInitialDirection(keys, X, Y, q, featureNames)
 
     # Perform LDA
     scores, numIdentified = doLda(q, keys, scores, X, Y)
@@ -1522,13 +1558,13 @@ def doSvm(thresh, keys, scores, X, Y,
             for cfrac in cfracs:
                 cneg = cfrac*cpos
                 classWeight = {1: alpha * cpos, -1: alpha * cneg}
-                clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-2)
+                clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-20)
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(X[validateSids])
                 # Calculate true positives
                 tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, False)
                 currentTaq = len(tp)
-                if _debug and _verb >= 1:
+                if _debug: # and _verb >= 1:
                     print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
                 if currentTaq > bestTaq:
                     bestTaq = currentTaq
@@ -1551,6 +1587,79 @@ def doSvm(thresh, keys, scores, X, Y,
 
     return newScores, totalTaq
 
+def doSvmLin(thresh, keys, scores, X, Y,
+             targetDecoyRatio):
+    """ Train and test SVM on CV bins
+    """
+    totalTaq = 0 # total number of estimated true positives at q-value threshold
+    # split dataset into thirds for testing/training
+    m = len(keys)/3
+    # record new scores as we go
+    # newScores = np.zeros(scores.shape)
+    newScores = []
+    testScores = np.zeros(Y.shape)
+    # C for positive and negative classes
+    cposes = [10., 1., 0.1]
+    cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
+    estTaq = 0
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+
+        cvBinSids = list( set(keys) - set(testSids) )
+        validateSids = cvBinSids
+
+        # Find training set using q-value analysis
+        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
+        gd = getDecoyIdx(Y, cvBinSids)
+        # Debugging check
+        if _debug: #  and _verb >= 1:
+            print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq))
+
+        trainSids = list(set(taq) | set(gd))
+
+        features = X[trainSids]
+        labels = Y[trainSids]
+        bestTaq = -1.
+        bestCp = cposes[0] * 0.5
+        bestCn = cfracs[0] * bestCp
+        bestClf = []
+        alpha = 1.
+        # Find cpos and cneg
+        for cpos in cposes:
+            for cfrac in cfracs:
+                cneg = cfrac*cpos
+                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                validation_scores = np.dot(X[validateSids], clf[:-1]) + clf[-1]
+                tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, True)
+                currentTaq = len(tp)
+                if _debug and _verb > 1:
+                    print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
+                # if _debug and _verb >= 1:
+                #     print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
+                if currentTaq > bestTaq:
+                    topScores = validation_scores
+                    bestTaq = currentTaq
+                    bestCp = cpos * alpha
+                    bestCn = cneg * alpha
+                    bestClf = deepcopy(clf)
+
+        newScores.append(topScores)
+        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
+        estTaq += bestTaq
+        # iter_scores = np.dot(X[testSids], bestClf[:-1]) + bestClf[-1]
+        # # Calculate true positives
+        # tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
+        # totalTaq += len(tp)
+
+        # for i, score in zip(testSids, iter_scores):
+        #     testScores[i] = score
+    estTaq /= 2
+    # print "Estimated %d targets at q <= %f" % (estTaq, thresh)
+    return newScores, estTaq, clf
+
 def calculateTargetDecoyRatio(Y):
     # calculate target-decoy ratio for the given training/testing set with labels Y
     numPos = 0
@@ -1562,6 +1671,22 @@ def calculateTargetDecoyRatio(Y):
             numNeg+=1
 
     return float(numPos) / max(1., float(numNeg))
+
+def doTestSvm(thresh, keys, X, Y, w):
+    m = len(keys)/3
+    testScores = np.zeros(Y.shape)
+    totalTaq = 0
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+
+        testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
+        # Calculate true positives
+        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
+        totalTaq += len(tp)
+    return testScores, totalTaq
 
 def svmIter(options, output):
     q = 0.01
@@ -1592,6 +1717,7 @@ def svmIter(options, output):
     t_scores = {}
     d_scores = {}
 
+    initTaq = 0.
     initDir = options.initDirection
     if initDir > -1 and initDir < m:
         print "Using specified initial direction %d" % (initDir)
@@ -1599,23 +1725,25 @@ def svmIter(options, output):
         scores = X[:,initDir]
         taq, _, _ = calcQ(scores, Y, q, False)
         print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+        initTaq += len(taq)
     else:
-        scores = searchForInitialDirection(keys, X, Y, q, featureNames)
-    
+        scores, initTaq = searchForInitialDirection_split(keys, X, Y, q, featureNames)
 
+    print "Initially could separate %d identifications" % ( initTaq / 2 )
     for i in range(options.maxIters):
-        scores, numIdentified = doSvm(q, keys, scores, X, Y,
-                                      targetDecoyRatio)
-        print "iter %d: %d targets" % (i, numIdentified)
-
-    # taq, _, _ = calcQ(scores, Y, q, False)
-    # print "Could identify %d targets" % (len(taq))
+        scores, numIdentified, w = doSvmLin(q, keys, scores, X, Y,
+                                            targetDecoyRatio)
+        print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
+    
+    # Calculate test scores
+    testScores, numIdentified = doTestSvm(q, keys, X, Y, w)
+    print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
     if _mergescore:
-        scores = doMergeScores(q, keys, scores, Y, 
+        scores = doMergeScores(q, keys, testScores, Y, 
                                t_scores, d_scores, 
                                target_rowsToSids, decoy_rowsToSids)
 
-    taq, _, _ = calcQ(scores, Y, q, True)
+    taq, _, _ = calcQ(scores, Y, q, False)
     print "Could identify %d targets" % (len(taq))
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
