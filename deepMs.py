@@ -1135,6 +1135,28 @@ def searchForInitialDirection(keys, X, Y, q, featureNames):
         scores[trainSids] = X[trainSids,initDir]
     return scores, initTaq
 
+def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
+    """ Iterate through cross validation training sets and find initial search directions
+        Returns the scores for the disjoint bins
+    """
+    initTaq = 0.
+    scores = []
+    # split dataset into thirds for testing/training
+    m = len(keys)/3
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+
+        trainSids = list(set(keys) - set(testSids))
+        taq, _, _ = calcQ(X[trainSids,initDir], Y[trainSids], thresh, True)
+        numIdentified = len(taq)
+        initTaq += numIdentified
+        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+        scores.append(X[trainSids,initDir])
+    return scores, initTaq
+
 def searchForInitialDirection_split(keys, X, Y, q, featureNames):
     """ Iterate through cross validation training sets and find initial search directions
         Returns the scores for the disjoint bins
@@ -1153,9 +1175,9 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
 
         # Find initial direction
         initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+
         initTaq += numIdentified
         print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
-        # scores[trainSids] = X[trainSids,initDir]
         scores.append(X[trainSids,initDir])
     return scores, initTaq
 
@@ -1847,10 +1869,12 @@ def doIter(thresh, keys, scores, X, Y,
 
         features = X[trainSids]
         labels = Y[trainSids]
+        validateFeatures = X[validateSids]
+        validateLabels = Y[validateSids]
         if method == 0:
             topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels)
         else:
-            topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels, X[validateSids], Y[validateSids],
+            topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validateFeatures, validateLabels,
                                                           cposes, cfracs, alpha, tron)
         newScores.append(topScores)
         clfs.append(bestClf)
@@ -1891,11 +1915,7 @@ def funcIter(options, output):
     initDir = options.initDirection
     if initDir > -1 and initDir < m:
         print "Using specified initial direction %d" % (initDir)
-        # Gather scores
-        scores = X[:,initDir]
-        taq, _, _ = calcQ(scores, Y, q, False)
-        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
-        initTaq += len(taq)
+        scores, initTaq = givenInitialDirection_split(keys, X, Y, q, featureNames, initDir)
     else:
         scores, initTaq = searchForInitialDirection_split(keys, X, Y, q, featureNames)
 
@@ -1905,9 +1925,7 @@ def funcIter(options, output):
                                            targetDecoyRatio, options.method)
         print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
     
-    isSvmlin = False
-    if options.method==2:
-        isSvmlin = True
+    isSvmlin = (options.method==2)
     testScores, numIdentified = doTest(q, keys, X, Y, ws, isSvmlin)
     print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
     if _mergescore:
