@@ -1676,6 +1676,27 @@ def doTestSvm(thresh, keys, X, Y, ws):
             testSids = keys[kFold * m : ]
         w = ws[kFold]
         testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
+        
+        # Calculate true positives
+        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
+        totalTaq += len(tp)
+    return testScores, totalTaq
+
+def doTest(thresh, keys, X, Y, ws, svmlin = False):
+    m = len(keys)/3
+    testScores = np.zeros(Y.shape)
+    totalTaq = 0
+    for kFold in range(3):
+        if kFold < 2:
+            testSids = keys[kFold * m : (kFold+1) * m]
+        else:
+            testSids = keys[kFold * m : ]
+        w = ws[kFold]
+        if svmlin:
+            testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
+        else:
+            testScores[testSids] = w.decision_function(X[testSids])
+        
         # Calculate true positives
         tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
         totalTaq += len(tp)
@@ -1741,24 +1762,35 @@ def svmIter(options, output):
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
 
-def doSvmGridSearch(features, labels, tron = True):
+def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels):
+    """ Perform LDA on a CV bin
+    """
+    clf = lda()
+    clf.fit(features, labels)
+    validation_scores = clf.decision_function(validateFeatures)
+    tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
+    print "CV finished for fold %d: %d targets identified" % (kFold, len(tp))
+    return validation_scores, len(tp), clf
+
+def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateLabels, 
+                    cposes, cfracs, alpha, tron = True):
     bestTaq = -1.
     bestCp = 1.
     bestCn = 1.
     bestClf = []
-    alpha = 1.
     # Find cpos and cneg
     for cpos in cposes:
         for cfrac in cfracs:
             cneg = cfrac*cpos
             if not tron:
                 clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
-                validation_scores = np.dot(X[validateSids], clf[:-1]) + clf[-1]
+                validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
             else:
+                classWeight = {1: alpha * cpos, -1: alpha * cneg}
                 clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-20)
                 clf.fit(features, labels)
-                validation_scores = clf.decision_function(X[validateSids])
-            tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, True)
+                validation_scores = clf.decision_function(validateFeatures)
+            tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
             if _debug and _verb > 1:
                 print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
@@ -1768,7 +1800,7 @@ def doSvmGridSearch(features, labels, tron = True):
                 bestCp = cpos * alpha
                 bestCn = cneg * alpha
                 bestClf = deepcopy(clf)
-
+    print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
     return topScores, bestTaq, bestClf
 
 def doIter(thresh, keys, scores, X, Y,
@@ -1784,12 +1816,17 @@ def doIter(thresh, keys, scores, X, Y,
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []
-    clf = [] # classifiers
+    clfs = [] # classifiers
 
     # C for positive and negative classes
     cposes = [10., 1., 0.1]
     cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
     estTaq = 0
+    tron = False
+    alpha = 1.
+    if method==1:
+        tron = True
+        alpha = 0.5
     for kFold in range(3):
         if kFold < 2:
             testSids = keys[kFold * m : (kFold+1) * m]
@@ -1810,16 +1847,78 @@ def doIter(thresh, keys, scores, X, Y,
 
         features = X[trainSids]
         labels = Y[trainSids]
-        if method > 0:
-            if method==1:
-                tron = True
-            topScores, bestTaq, bestClf = doSvmGridSearch(features, labels, tron)
+        if method == 0:
+            topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels)
+        else:
+            topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels, X[validateSids], Y[validateSids],
+                                                          cposes, cfracs, alpha, tron)
         newScores.append(topScores)
         clfs.append(bestClf)
-        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
         estTaq += bestTaq
     estTaq /= 2
-    return newScores, estTaq, bestClf
+    return newScores, estTaq, clfs
+
+def funcIter(options, output):
+    q = 0.01
+    f = options.pin
+    # target_rows: dictionary mapping target sids to rows in the feature matrix
+    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
+    # X: standard-normalized feature matrix
+    # Y: binary labels, true denoting a target PSM
+    oneHotChargeVector = True
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f, oneHotChargeVector)
+    # get mapping from rows to spectrum ids
+    target_rowsToSids = {}
+    decoy_rowsToSids = {}
+    for tr in target_rows:
+        target_rowsToSids[target_rows[tr]] = tr
+    for dr in decoy_rows:
+        decoy_rowsToSids[decoy_rows[dr]] = dr
+    l = X.shape
+    n = l[0] # number of instances
+    m = l[1] # number of features
+
+    targetDecoyRatio = calculateTargetDecoyRatio(Y)
+
+    print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (len(target_rows), len(decoy_rows), l[1], targetDecoyRatio)
+    keys = range(n)
+
+    random.shuffle(keys)
+    t_scores = {}
+    d_scores = {}
+
+    initTaq = 0.
+    initDir = options.initDirection
+    if initDir > -1 and initDir < m:
+        print "Using specified initial direction %d" % (initDir)
+        # Gather scores
+        scores = X[:,initDir]
+        taq, _, _ = calcQ(scores, Y, q, False)
+        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
+        initTaq += len(taq)
+    else:
+        scores, initTaq = searchForInitialDirection_split(keys, X, Y, q, featureNames)
+
+    print "Initially could separate %d identifications" % ( initTaq / 2 )
+    for i in range(options.maxIters):
+        scores, numIdentified, ws = doIter(q, keys, scores, X, Y,
+                                           targetDecoyRatio, options.method)
+        print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
+    
+    isSvmlin = False
+    if options.method==2:
+        isSvmlin = True
+    testScores, numIdentified = doTest(q, keys, X, Y, ws, isSvmlin)
+    print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
+    if _mergescore:
+        scores = doMergeScores(q, keys, testScores, Y, 
+                               t_scores, d_scores, 
+                               target_rowsToSids, decoy_rowsToSids)
+
+    taq, _, _ = calcQ(scores, Y, q, False)
+    print "Could identify %d targets" % (len(taq))
+    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
+                decoy_rowsToSids, d_scores)
 
 if __name__ == '__main__':
     parser = optparse.OptionParser()
@@ -1827,6 +1926,7 @@ if __name__ == '__main__':
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--initDirection', type = 'int', action= 'store', default = -1)
     parser.add_option('--verb', type = 'int', action= 'store', default = -1)
+    parser.add_option('--method', type = 'int', action= 'store', default = 2)
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 10)
     parser.add_option('--pin', type = 'string', action= 'store')
     parser.add_option('--filebase', type = 'string', action= 'store')
@@ -1858,4 +1958,5 @@ if __name__ == '__main__':
     # TODO: add q-value post-processing: mix-max and TDC
     # TODO: write to a better output file format
 
-    svmIter(options, discOutput)
+    # svmIter(options, discOutput)
+    funcIter(options, discOutput)
