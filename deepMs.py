@@ -1150,7 +1150,7 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
             testSids = keys[kFold * m : ]
 
         trainSids = list(set(keys) - set(testSids))
-        taq, _, _ = calcQ(X[trainSids,initDir], Y[trainSids], thresh, True)
+        taq, _, _ = calcQ(X[trainSids,initDir], Y[trainSids], q, True)
         numIdentified = len(taq)
         initTaq += numIdentified
         print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
