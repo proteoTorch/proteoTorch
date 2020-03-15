@@ -39,7 +39,7 @@ from svmlin import svmlin
 ################### Global variables
 #########################################################
 _debug=True
-_verb=2
+_verb=3
 _mergescore=True
 _includeNegativesInResult=True
 _standardNorm=True
@@ -996,10 +996,19 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
             if i.lower() == 'xcorr':
                 scoreKey = i            
 
-    # fields we have to keep track of
-    psmKeys = set(["SpecId", "Label", sidKey, scoreKey, "Peptide", "Proteins"])
-    constKeys = set(["SpecId", "Label", sidKey, scoreKey, "charge", "Peptide", "Proteins"]) # exclude these when reserializing data
+    constKeys = ["SpecId", "Label", sidKey, "Peptide", "Proteins", "CalcMass", "ExpMass"]
+    if not oneHotChargeVector:
+        constKeys = set(constKeys + chargeKeys) # exclude these when reserializing data
+    else:
+        constKeys = set(constKeys) # exclude these when reserializing data
+
     keys = list(set(l.iterkeys()) - constKeys)
+    featureNames = []
+    if not oneHotChargeVector:
+        featureNames.append("Charge")
+    for k in keys:
+        featureNames.append(k)
+            
 
     targets = {}  # mapping between sids and indices in the feature matrix
     decoys = {}
@@ -1009,18 +1018,6 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     pepstrings = []
     scoreIndex = _scoreInd # column index of the ranking score used by the search algorithm 
     numRows = 0
-    # feature descriptions
-
-    if not oneHotChargeVector:
-        featureNames = [scoreKey, "Charge", "pepLen"]
-        for k in keys:
-            featureNames.append(k)
-    else:
-        featureNames = [scoreKey]
-        featureNames += chargeKeys
-        featureNames.append("pepLen")
-        for k in keys:
-            featureNames.append(k)
     
     for i, l in enumerate(reader):
         try:
@@ -1051,16 +1048,22 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
             exit(-1)
 
         el = []
-        # el.append(sid)
-        el.append(float(l[scoreKey]))
         if not oneHotChargeVector:
             el.append(charge)
-        else:
-            for c in chargeKeys:
-                el.append(int(l[c]))
-        el.append(len(l["Peptide"])-4)
         for k in keys:
             el.append(float(l[k]))
+
+        # el = []
+        # # el.append(sid)
+        # el.append(float(l[scoreKey]))
+        # if not oneHotChargeVector:
+        #     el.append(charge)
+        # else:
+        #     for c in chargeKeys:
+        #         el.append(int(l[c]))
+        # el.append(len(l["Peptide"])-4)
+        # for k in keys:
+        #     el.append(float(l[k]))
 
         # Note: remove taking the max wrt sid below
         if kind == 't':
@@ -1804,14 +1807,14 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
     for cpos in cposes:
         for cfrac in cfracs:
             cneg = cfrac*cpos
-            if not tron:
-                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
-                validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
-            else:
+            if tron:
                 classWeight = {1: alpha * cpos, -1: alpha * cneg}
-                clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-20)
+                clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-7)
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(validateFeatures)
+            else:
+                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
             if _debug and _verb > 1:
@@ -1883,7 +1886,7 @@ def doIter(thresh, keys, scores, X, Y,
     return newScores, estTaq, clfs
 
 def funcIter(options, output):
-    q = 0.01
+    q = options.q
     f = options.pin
     # target_rows: dictionary mapping target sids to rows in the feature matrix
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
@@ -1905,6 +1908,8 @@ def funcIter(options, output):
     targetDecoyRatio = calculateTargetDecoyRatio(Y)
 
     print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (len(target_rows), len(decoy_rows), l[1], targetDecoyRatio)
+    if _debug and _verb >= 3:
+        print featureNames
     keys = range(n)
 
     random.shuffle(keys)
@@ -1919,7 +1924,7 @@ def funcIter(options, output):
     else:
         scores, initTaq = searchForInitialDirection_split(keys, X, Y, q, featureNames)
 
-    print "Initially could separate %d identifications" % ( initTaq / 2 )
+    print "Could initially separate %d identifications" % ( initTaq / 2 )
     for i in range(options.maxIters):
         scores, numIdentified, ws = doIter(q, keys, scores, X, Y,
                                            targetDecoyRatio, options.method)
