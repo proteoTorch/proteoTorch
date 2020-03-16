@@ -976,6 +976,7 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     if "Charge1" not in l:
         raise ValueError("No Charge1 field, exitting")
 
+    sids = []
     # spectrum identification key for PIN files
     sidKey = "ScanNr" # note that this typically denotes retention time
 
@@ -1072,11 +1073,13 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                 if el[scoreIndex] > featScore:
                     X[targets[sid]] = el
                     pepstrings[targets[sid]] = l["Peptide"][2:-2]
+                    sids[targets[sid]] = sid
             else:
                 targets[sid] = numRows
                 X.append(el)
                 Y.append(1)
                 pepstrings.append(l["Peptide"][2:-2])
+                sids.append(sid)
                 numRows += 1
         elif kind == 'd':
             if sid in decoys:
@@ -1084,18 +1087,20 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                 if el[scoreIndex] > featScore:
                     X[decoys[sid]] = el
                     pepstrings[decoys[sid]] = l["Peptide"][2:-2]
+                    sids[decoys[sid]] = sid
             else:
                 decoys[sid] = numRows
                 X.append(el)
                 Y.append(-1)
                 pepstrings.append(l["Peptide"][2:-2])
+                sids.append(sid)
                 numRows += 1
     # Standard-normalize the feature matrix
     if _standardNorm:
-        return targets,decoys, pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames
+        return targets,decoys, pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
     else:
         min_max_scaler = preprocessing.MinMaxScaler()
-        return targets,decoys, pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames
+        return targets,decoys, pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
 
 def findInitDirection(X, Y, thresh, featureNames):
     l = X.shape
@@ -1145,14 +1150,15 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
     initTaq = 0.
     scores = []
     # split dataset into thirds for testing/training
-    m = len(keys)/3
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
+    for trainSids in keys:
+    # m = len(keys)/3
+    # for kFold in range(3):
+    #     if kFold < 2:
+    #         testSids = keys[kFold * m : (kFold+1) * m]
+    #     else:
+    #         testSids = keys[kFold * m : ]
 
-        trainSids = list(set(keys) - set(testSids))
+    #     trainSids = list(set(keys) - set(testSids))
         taq, _, _ = calcQ(X[trainSids,initDir], Y[trainSids], q, True)
         numIdentified = len(taq)
         initTaq += numIdentified
@@ -1166,15 +1172,17 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
     """
     initTaq = 0.
     scores = []
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
+    kFold = 0
+    for trainSids in keys:
+    # # split dataset into thirds for testing/training
+    # m = len(keys)/3
+    # for kFold in range(3):
+    #     if kFold < 2:
+    #         testSids = keys[kFold * m : (kFold+1) * m]
+    #     else:
+    #         testSids = keys[kFold * m : ]
 
-        trainSids = list(set(keys) - set(testSids))
+    #     trainSids = list(set(keys) - set(testSids))
 
         # Find initial direction
         initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
@@ -1182,6 +1190,7 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
         initTaq += numIdentified
         print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
         scores.append(X[trainSids,initDir])
+        kFold += 1
     return scores, initTaq
 
 def doMergeScores(thresh, keys, scores, Y, 
@@ -1191,11 +1200,12 @@ def doMergeScores(thresh, keys, scores, Y,
     m = len(keys)/3
     # record new scores as we go
     newScores = np.zeros(scores.shape)
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
+    for testSids in keys:
+    # for kFold in range(3):
+    #     if kFold < 2:
+    #         testSids = keys[kFold * m : (kFold+1) * m]
+    #     else:
+    #         testSids = keys[kFold * m : ]
             
         u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
         diff = u - d
@@ -1711,11 +1721,13 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
     m = len(keys)/3
     testScores = np.zeros(Y.shape)
     totalTaq = 0
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
+    kFold = 0
+    for testSids in keys:
+    # for kFold in range(3):
+    #     if kFold < 2:
+    #         testSids = keys[kFold * m : (kFold+1) * m]
+    #     else:
+    #         testSids = keys[kFold * m : ]
         w = ws[kFold]
         if svmlin:
             testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
@@ -1725,6 +1737,7 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
         # Calculate true positives
         tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
         totalTaq += len(tp)
+        kFold += 1
     return testScores, totalTaq
 
 def svmIter(options, output):
@@ -1842,7 +1855,7 @@ def doIter(thresh, keys, scores, X, Y,
     # newScores = np.zeros(scores.shape)
     newScores = []
     clfs = [] # classifiers
-
+    kFold = 0
     # C for positive and negative classes
     cposes = [10., 1., 0.1]
     cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
@@ -1852,13 +1865,14 @@ def doIter(thresh, keys, scores, X, Y,
     if method==1:
         tron = True
         alpha = 0.5
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
+    for cvBinSids in keys:
+    # for kFold in range(3):
+    #     if kFold < 2:
+    #         testSids = keys[kFold * m : (kFold+1) * m]
+    #     else:
+    #         testSids = keys[kFold * m : ]
 
-        cvBinSids = list( set(keys) - set(testSids) )
+    #     cvBinSids = list( set(keys) - set(testSids) )
         validateSids = cvBinSids
 
         # Find training set using q-value analysis
@@ -1882,8 +1896,46 @@ def doIter(thresh, keys, scores, X, Y,
         newScores.append(topScores)
         clfs.append(bestClf)
         estTaq += bestTaq
+        kFold += 1
     estTaq /= 2
     return newScores, estTaq, clfs
+
+def doRand(seed):
+    return (seed * 279470273) % 4294967291
+
+def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
+    trainKeys = []
+    testKeys = []
+    for i in range(folds):
+        trainKeys.append([])
+        testKeys.append([])
+    remain = []
+    r = 0
+    for i in range(folds-1):
+        remain.append(len(sids) / folds)
+        r+=len(sids) / folds
+    remain.append(len(sids) - r)
+    prevSid = sids[0]
+    seed = doRand(seed)
+    randIdx = seed % folds
+    it = 0
+    for k,sid in zip(featureMatRowIndices, sids):
+        if (sid!=prevSid):
+            seed = doRand(seed)
+            randIdx = seed % folds
+            while remain[randIdx] <= 0:
+                seed = doRand(seed)
+                randIdx = seed % folds
+        for i in range(folds):
+            if i==randIdx:
+                testKeys[i].append(k)
+            else:
+                trainKeys[i].append(k)
+
+        remain[randIdx] -= 1
+        prevSid = sid
+        it += 1
+    return trainKeys, testKeys
 
 def funcIter(options, output):
     q = options.q
@@ -1893,7 +1945,9 @@ def funcIter(options, output):
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
     oneHotChargeVector = True
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f, oneHotChargeVector)
+    target_rows, decoy_rows, pepstrings, X, Y, featureNames, sids = load_pin_return_featureMatrix(f, oneHotChargeVector)
+    print X.mean(axis=0)
+    print X.std(axis=0)
     # get mapping from rows to spectrum ids
     target_rowsToSids = {}
     decoy_rowsToSids = {}
@@ -1906,13 +1960,19 @@ def funcIter(options, output):
     m = l[1] # number of features
 
     targetDecoyRatio = calculateTargetDecoyRatio(Y)
-
     print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (len(target_rows), len(decoy_rows), l[1], targetDecoyRatio)
+
     if _debug and _verb >= 3:
         print featureNames
-    keys = range(n)
+    keySids = sorted(zip(sids, range(len(sids))))
+    keys = [j for (_,j) in keySids]
+    sids = [i for (i,_) in  keySids]
+    trainKeys, testKeys = partitionCvBins(keys, sids)
+    for i in range(3):
+        print len(trainKeys[i]), len(testKeys[i])
+    for i,j in zip(trainKeys, testKeys):
+        print len(i), len(j)
 
-    random.shuffle(keys)
     t_scores = {}
     d_scores = {}
 
@@ -1920,21 +1980,21 @@ def funcIter(options, output):
     initDir = options.initDirection
     if initDir > -1 and initDir < m:
         print "Using specified initial direction %d" % (initDir)
-        scores, initTaq = givenInitialDirection_split(keys, X, Y, q, featureNames, initDir)
+        scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
     else:
-        scores, initTaq = searchForInitialDirection_split(keys, X, Y, q, featureNames)
+        scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames)
 
     print "Could initially separate %d identifications" % ( initTaq / 2 )
     for i in range(options.maxIters):
-        scores, numIdentified, ws = doIter(q, keys, scores, X, Y,
+        scores, numIdentified, ws = doIter(q, trainKeys, scores, X, Y,
                                            targetDecoyRatio, options.method)
         print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
     
     isSvmlin = (options.method==2)
-    testScores, numIdentified = doTest(q, keys, X, Y, ws, isSvmlin)
+    testScores, numIdentified = doTest(q, testKeys, X, Y, ws, isSvmlin)
     print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
     if _mergescore:
-        scores = doMergeScores(q, keys, testScores, Y, 
+        scores = doMergeScores(q, testKeys, testScores, Y, 
                                t_scores, d_scores, 
                                target_rowsToSids, decoy_rowsToSids)
 
