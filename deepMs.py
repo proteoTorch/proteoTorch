@@ -43,6 +43,7 @@ _verb=3
 _mergescore=True
 _includeNegativesInResult=True
 _standardNorm=True
+_topPsm=True
 # General assumed iterators for lists of score tuples
 _scoreInd=0
 _labelInd=1
@@ -205,761 +206,6 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = True):
                 daq.append(curr_og_idx)
     return taq,daq, [qvals[i] for _,_,i in allScores]
 
-def load_pin_file(filename):
-    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
-        the spectrum identification number
-        Todo: add a parser to load PSMs from a DRIP run, returning each PSM as an instance of the 
-        dripPSM class
-
-        Normal tide with DRIP features
-        SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	insertions	deletions	peaksScoredA	theoPeaksUsedA	SumScoredIntensities	SumScoredMzDist	Peptide	Proteins
-    """
-
-    targets = {}
-    decoys = {}
-    with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
-    if "ScanNr" not in l:
-        raise ValueError("No ScanNr field, exitting")
-    if "Charge1" not in l:
-        raise ValueError("No Charge1 field, exitting")
-
-    # spectrum identification key for PIN files
-    sidKey = "ScanNr" # note that this typically denotes retention time
-    
-    numPeps = 0
-
-    maxCharge = 1
-    chargeKeys = set([])
-    # look at score key and charge keys
-    scoreKey = ''
-    for i in l:
-        m = i.lower()
-        if m == 'score':
-            scoreKey = i
-        if m[:-1]=='charge':
-            chargeKeys.add(i)
-            maxCharge = max(maxCharge, int(m[-1]))
-
-    if not scoreKey:
-        for i in l:
-            if i.lower() == 'xcorr':
-                scoreKey = i            
-
-    # fields we have to keep track of
-    psmKeys = set(["SpecId", "Label", sidKey, scoreKey, "Peptide", "Proteins"])
-    keys = []
-    for k in l:
-        if k not in psmKeys and k not in chargeKeys:
-            keys.append(k)
-            
-    for i, l in enumerate(reader):
-        try:
-            sid = int(l[sidKey])
-        except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
-        charge = 0
-        # look for current PSM, encoded as a one-hot vector
-        for c in chargeKeys:
-            try:
-                charge = int(l[c])
-            except ValueError:
-                print "Could not convert charge %s on line %d to int, exitting" % (l[c], i+1)
-
-            if charge:
-                charge = int(c[-1])
-                break
-
-        assert charge > 0, "No charge denoted with value 1 for PSM on line %d, exitting" % (i+1)
-
-        el = {}
-        for k in keys:
-            el[k] = l[k]
-
-        if l["Label"] == '1':
-            kind = 't'
-        elif l["Label"] == '-1':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be -1 or 1, exitting" % l["Label"]
-            exit(-1)
-
-        try:
-            el = PSM(l["Peptide"],
-                     float(l[scoreKey]),
-                     int(l[sidKey]),
-                     kind,
-                     charge,
-                     el,
-                     l["Proteins"],
-                     l["SpecId"])
-        except KeyError:
-            print "Standard PSM field not encountered, exitting"
-            exit(-1)
-
-        if kind == 't':
-            if (sid,charge) not in targets:
-                targets[sid,charge] = []
-            targets[sid,charge].append(el)
-            numPeps += 1
-        elif kind == 'd':
-            if (sid,charge) not in decoys:
-                decoys[sid,charge] = []
-            decoys[sid,charge].append(el)
-            numPeps += 1
-
-    return targets,decoys,numPeps
-
-def load_pin_return_dict(filename):
-    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
-        the spectrum identification number
-        Todo: add a parser to load PSMs from a DRIP run, returning each PSM as an instance of the 
-        dripPSM class
-
-        Normal tide with DRIP features
-        SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	insertions	deletions	peaksScoredA	theoPeaksUsedA	SumScoredIntensities	SumScoredMzDist	Peptide	Proteins
-    """
-
-    targets = {}
-    decoys = {}
-    with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
-    if "ScanNr" not in l:
-        raise ValueError("No ScanNr field, exitting")
-    if "Charge1" not in l:
-        raise ValueError("No Charge1 field, exitting")
-
-    # spectrum identification key for PIN files
-    sidKey = "ScanNr" # note that this typically denotes retention time
-
-    numPeps = 0
-
-    maxCharge = 1
-    chargeKeys = set([])
-    # look at score key and charge keys
-    scoreKey = ''
-    for i in l:
-        m = i.lower()
-        if m == 'score':
-            scoreKey = i
-        if m[:-1]=='charge':
-            chargeKeys.add(i)
-            maxCharge = max(maxCharge, int(m[-1]))
-
-    if not scoreKey:
-        for i in l:
-            if i.lower() == 'xcorr':
-                scoreKey = i            
-
-    # fields we have to keep track of
-    psmKeys = set(["SpecId", "Label", sidKey, scoreKey, "Peptide", "Proteins"])
-    keys = list(set(l.iterkeys()) - psmKeys)
-    for i, l in enumerate(reader):
-        try:
-            sid = int(l[sidKey])
-        except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
-        charge = 0
-        # look for current PSM, encoded as a one-hot vector
-        for c in chargeKeys:
-            try:
-                charge = int(l[c])
-            except ValueError:
-                print "Could not convert charge %s on line %d to int, exitting" % (l[c], i+1)
-
-            if charge:
-                charge = int(c[-1])
-                break
-
-        assert charge > 0, "No charge denoted with value 1 for PSM on line %d, exitting" % (i+1)
-
-        el = {}
-        for k in keys:
-            el[k] = l[k]
-
-        if l["Label"] == '1':
-            kind = 't'
-        elif l["Label"] == '-1':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be -1 or 1, exitting" % l["Label"]
-            exit(-1)
-
-        try:
-            el = PSM(l["Peptide"],
-                     float(l[scoreKey]),
-                     int(l[sidKey]),
-                     kind,
-                     charge,
-                     el,
-                     l["Proteins"],
-                     l["SpecId"])
-        except KeyError:
-            print "Standard PSM field not encountered, exitting"
-            exit(-1)
-
-        sid = el.scan
-        if kind == 't':
-            if sid in targets:
-                if el.score > targets[sid].score:
-                    targets[sid] = el
-            else:
-                targets[sid] = el
-                numPeps += 1
-        elif kind == 'd':
-            if sid in decoys:
-                if el.score > decoys[sid].score:
-                    decoys[sid] = el
-            else:
-                decoys[sid] = el
-                numPeps += 1
-            # targets[el.scan, el.peptide] = el # hash key for PSM class is (scan, peptide string), so
-            #                                   # we shouldn't get collisions without adding charge as a key
-        #     numPeps += 1
-        # elif kind == 'd':
-        #     decoys[el.scan, el.peptide] = el # hash key for PSM class is (scan, peptide string), so
-        #                                      # we shouldn't get collisions without adding charge as a key
-        #     numPeps += 1
-    return targets,decoys
-
-def load_ident_return_dict(filename):
-    """ Load all PSMs and features ident file
-    """
-    targets = {}
-    decoys = {}
-    with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
-    if "Sid" not in l:
-        raise ValueError("No Sid field, exitting")
-    # if "Charge" not in l:
-    #     raise ValueError("No Charge field, exitting")
-
-    # spectrum identification key for PIN files
-    sidKey = "Sid" # note that this typically denotes retention time
-    numPeps = 0
-    # look at score key and charge keys
-    scoreKey = 'Score'
-    for i, l in enumerate(reader):
-        try:
-            sid = int(l[sidKey])
-        except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
-        if l["Kind"] == 't':
-            kind = 't'
-        elif l["Kind"] == 'd':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be t or d, exitting" % l["Label"]
-            exit(-1)
-
-        charge = int(l["Charge"])
-
-        el = []
-        el.append(sid)
-        el.append(float(l[scoreKey]))
-        el.append(charge)
-        el.append(l["Peptide"])
-
-        if kind == 't':
-            targets[sid, charge] = el
-            numPeps += 1
-        elif kind == 'd':
-            decoys[sid, charge] = el
-            numPeps += 1
-        # if kind == 't':
-        #     if sid in targets:
-        #         if el[1] > targets[sid][1]:
-        #             targets[sid] = el
-        #     else:
-        #         targets[sid] = el
-        #         numPeps += 1
-        # elif kind == 'd':
-        #     if sid in decoys:
-        #         if el[1] > decoys[sid][1]:
-        #             decoys[sid] = el
-        #     else:
-        #         decoys[sid] = el
-        #         numPeps += 1
-
-    return targets,decoys
-
-def load_pin_return_dictOfArrs(filename):
-    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
-        the spectrum identification number
-
-        Normal tide features
-        SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
-    """
-
-    targets = {}
-    decoys = {}
-    with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
-    if "ScanNr" not in l:
-        raise ValueError("No ScanNr field, exitting")
-    if "Charge1" not in l:
-        raise ValueError("No Charge1 field, exitting")
-
-    # spectrum identification key for PIN files
-    sidKey = "ScanNr" # note that this typically denotes retention time
-
-    numPeps = 0
-
-    maxCharge = 1
-    chargeKeys = set([])
-    # look at score key and charge keys
-    scoreKey = ''
-    for i in l:
-        m = i.lower()
-        if m == 'score':
-            scoreKey = i
-        if m[:-1]=='charge':
-            chargeKeys.add(i)
-            maxCharge = max(maxCharge, int(m[-1]))
-
-    if not scoreKey:
-        for i in l:
-            if i.lower() == 'xcorr':
-                scoreKey = i            
-
-    # fields we have to keep track of
-    psmKeys = set(["SpecId", "Label", sidKey, scoreKey, "Peptide", "Proteins"])
-    constKeys = set(["SpecId", "Label", sidKey, scoreKey, "charge", "Peptide", "Proteins"]) # exclude these when reserializing data
-    keys = list(set(l.iterkeys()) - constKeys)
-    for i, l in enumerate(reader):
-        try:
-            sid = int(l[sidKey])
-        except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
-        charge = 0
-        # look for current PSM, encoded as a one-hot vector
-        for c in chargeKeys:
-            try:
-                charge = int(l[c])
-            except ValueError:
-                print "Could not convert charge %s on line %d to int, exitting" % (l[c], i+1)
-
-            if charge:
-                charge = int(c[-1])
-                break
-
-        assert charge > 0, "No charge denoted with value 1 or greater for PSM on line %d, exitting" % (i+1)
-
-        if l["Label"] == '1':
-            kind = 't'
-        elif l["Label"] == '-1':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be -1 or 1, exitting" % l["Label"]
-            exit(-1)
-
-        el = []
-        # el.append(sid)
-        el.append(float(l[scoreKey]))
-        el.append(charge)
-        el.append(len(l["Peptide"]))
-        for k in keys:
-            el.append(float(l[k]))
-
-        if kind == 't':
-            if sid in targets:
-                if el[0] > targets[sid][1]:
-                    targets[sid] = el
-            else:
-                targets[sid] = el
-                numPeps += 1
-        elif kind == 'd':
-            if sid in decoys:
-                if el[0] > decoys[sid][1]:
-                    decoys[sid] = el
-            else:
-                decoys[sid] = el
-                numPeps += 1
-    return targets,decoys
-
-def peptideProphetProcess(filename):
-    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
-        the spectrum identification number
-    """
-    consts = [0.646, -0.959, -1.460, -0.774, -0.598, -0.598, -0.598]
-    xcorrs = [5.49, 8.362, 9.933, 1.465, 3.89, 3.89, 3.89]
-    deltas = [4.643, 7.386, 11.149, 8.704, 7.271, 7.271, 7.271]
-    ranks = [-0.455, -0.194, -0.201, -0.331, -0.377, -0.377, -0.377]
-    massdiffs =  [-0.84, -0.314, -0.277, -0.277, -0.84, -0.84, -0.84]
-    max_pep_lens = [100, 15, 25, 50, 100, 100, 100]
-    num_frags = [2, 2, 3, 4, 6, 6, 6]
-
-    eps = 0.001
-
-    targets = {}
-    decoys = {}
-    with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
-    if "ScanNr" not in l:
-        raise ValueError("No ScanNr field, exitting")
-    if "Charge1" not in l:
-        raise ValueError("No Charge1 field, exitting")
-
-    # spectrum identification key for PIN files
-    sidKey = "ScanNr" # note that this typically denotes retention time
-
-    numPeps = 0
-
-    maxCharge = 1
-    chargeKeys = set([])
-    # look at score key and charge keys
-    scoreKey = ''
-    for i in l:
-        if not i:
-            continue
-        m = i.lower()
-        if m == 'score':
-            scoreKey = i
-        if m[:-1]=='charge':
-            chargeKeys.add(i)
-            maxCharge = max(maxCharge, int(m[-1]))
-
-    if not scoreKey:
-        for i in l:
-            if i and i.lower() == 'xcorr':
-                scoreKey = i            
-
-    # fields we have to keep track of
-    psmKeys = set(["SpecId", "Label", sidKey, scoreKey, "Peptide", "Proteins"])
-    constKeys = set(["SpecId", "Label", sidKey, scoreKey, "charge", "Peptide", "Proteins"]) # exclude these when reserializing data
-    keys = list(set(l.iterkeys()) - constKeys)
-    min_xcorr = min([float(l[scoreKey]) for l in reader]) - eps
-
-    for i, l in enumerate(reader):
-        psmid = l["SpecId"]
-        psmSplit = psmid.split('_')
-        counter = int(psmSplit[1])
-        try:
-            sid = int(l[sidKey])
-        except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
-        charge = 0
-        # look for current PSM, encoded as a one-hot vector
-        for c in chargeKeys:
-            try:
-                charge = int(l[c])
-            except ValueError:
-                print "Could not convert charge %s on line %d to int, exitting" % (l[c], i+1)
-
-            if charge:
-                charge = int(c[-1])
-                break
-
-        assert charge > 0, "No charge denoted with value 1 for PSM on line %d, exitting" % (i+1)
-
-        if l["Label"] == '1':
-            kind = 't'
-        elif l["Label"] == '-1':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be -1 or 1, exitting" % l["Label"]
-            exit(-1)
-
-        ind = charge - 1
-        xcorr = float(l[scoreKey]) - min_xcorr
-        lp = len(l["Peptide"])
-        nl = num_frags[ind] * lp
-        lc = max_pep_lens[ind]
-        nc = num_frags[ind] * lc
-
-        if lp < lc:
-            try:
-                xcorr = math.log(xcorr) / math.log(nl)
-            except ValueError:
-                print "xcorr=%f, nl=%f" % (xcorr, nl)
-        else:
-            try:
-                xcorr = math.log(xcorr) / math.log(nc)
-            except ValueError:
-                print "xcorr=%f, nc=%f" % (xcorr, nc)
-
-        s = consts[ind] + xcorr * xcorrs[ind] + float(l["deltCn"]) * deltas[ind] + float(l["absdM"]) * massdiffs[ind] + float(l["lnrSp"]) * ranks[ind]
-        # s = consts[ind] + xcorr * xcorrs[ind] + float(l["deltCn"]) * deltas[ind] + float(l["absdM"]) * massdiffs[ind]
-
-        el = []
-        el.append(sid)
-        el.append(s)
-        el.append(charge)
-        el.append(l["Peptide"])
-        for k in keys:
-            if not k:
-                continue
-            el.append(float(l[k]))
-
-        if kind == 't':
-            targets[sid, charge, counter] = el
-            numPeps += 1
-        elif kind == 'd':
-            decoys[sid, charge, counter] = el
-            numPeps += 1
-    print "Evaluated %d PSMs" % numPeps
-    return targets,decoys
-
-def load_pin_return_dictOfArrs_peptideProphet(filename):
-    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
-        the spectrum identification number
-    """
-    consts = [0.646, -0.959, -1.460, -0.774, -0.598, -0.598, -0.598]
-    xcorrs = [5.49, 8.362, 9.933, 1.465, 3.89, 3.89, 3.89]
-    deltas = [4.643, 7.386, 11.149, 8.704, 7.271, 7.271, 7.271]
-    ranks = [-0.455, -0.194, -0.201, -0.331, -0.377, -0.377, -0.377]
-    massdiffs =  [-0.84, -0.314, -0.277, -0.277, -0.84, -0.84, -0.84]
-    max_pep_lens = [100, 15, 25, 50, 100, 100, 100]
-    num_frags = [2, 2, 3, 4, 6, 6, 6]
-
-    eps = 0.001
-
-    targets = {}
-    decoys = {}
-    with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
-    if "ScanNr" not in l:
-        raise ValueError("No ScanNr field, exitting")
-    if "Charge1" not in l:
-        raise ValueError("No Charge1 field, exitting")
-
-    # spectrum identification key for PIN files
-    sidKey = "ScanNr" # note that this typically denotes retention time
-
-    numPeps = 0
-
-    maxCharge = 1
-    chargeKeys = set([])
-    # look at score key and charge keys
-    scoreKey = ''
-    for i in l:
-        if not i:
-            continue
-        m = i.lower()
-        if m == 'score':
-            scoreKey = i
-        if m[:-1]=='charge':
-            chargeKeys.add(i)
-            maxCharge = max(maxCharge, int(m[-1]))
-
-    if not scoreKey:
-        for i in l:
-            if i and i.lower() == 'xcorr':
-                scoreKey = i            
-
-    # fields we have to keep track of
-    psmKeys = set(["SpecId", "Label", sidKey, scoreKey, "Peptide", "Proteins"])
-    # constKeys = set(["SpecId", "Label", sidKey, scoreKey, "charge", "Peptide", "Proteins"]) # exclude these when reserializing data
-    constKeys = set(["SpecId", "Label", sidKey, scoreKey, "charge", "Peptide", "Proteins", "enzN", "enzC", "enzInt", "deltLCn"]) # exclude these when reserializing data
-    keys = list(set(l.iterkeys()) - constKeys)
-    min_xcorr = min([float(l[scoreKey]) for l in reader]) - eps
-
-    for i, l in enumerate(reader):
-        psmid = l["SpecId"]
-        psmSplit = psmid.split('_')
-        counter = int(psmSplit[1])
-        try:
-            sid = int(l[sidKey])
-        except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
-        charge = 0
-        # look for current PSM, encoded as a one-hot vector
-        for c in chargeKeys:
-            try:
-                charge = int(l[c])
-            except ValueError:
-                print "Could not convert charge %s on line %d to int, exitting" % (l[c], i+1)
-
-            if charge:
-                charge = int(c[-1])
-                break
-
-        assert charge > 0, "No charge denoted with value 1 for PSM on line %d, exitting" % (i+1)
-
-        if l["Label"] == '1':
-            kind = 't'
-        elif l["Label"] == '-1':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be -1 or 1, exitting" % l["Label"]
-            exit(-1)
-
-        ind = charge - 1
-        xcorr = float(l[scoreKey]) - min_xcorr
-        lp = len(l["Peptide"])
-        nl = num_frags[ind] * lp
-        lc = max_pep_lens[ind]
-        nc = num_frags[ind] * lc
-
-        if lp < lc:
-            try:
-                xcorr = math.log(xcorr) / math.log(nl)
-            except ValueError:
-                print "xcorr=%f, nl=%f" % (xcorr, nl)
-        else:
-            try:
-                xcorr = math.log(xcorr) / math.log(nc)
-            except ValueError:
-                print "xcorr=%f, nc=%f" % (xcorr, nc)
-
-        el = []
-        # el.append(sid)
-        el.append(xcorr)
-        el.append(charge)
-        el.append(len(l["Peptide"]))
-        for k in keys:
-            if not k:
-                continue
-            el.append(float(l[k]))
-
-        if kind == 't':
-            targets[sid, charge, counter] = el
-            numPeps += 1
-        elif kind == 'd':
-            decoys[sid, charge, counter] = el
-            numPeps += 1
-    print "Evaluated %d PSMs" % numPeps
-    return targets,decoys
-
-def load_pin_return_dictOfArrs_peptideProphet_db(filename):
-    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
-        the spectrum identification number
-    """
-    consts = [0.646, -0.959, -1.460, -0.774, -0.598, -0.598, -0.598]
-    xcorrs = [5.49, 8.362, 9.933, 1.465, 3.89, 3.89, 3.89]
-    deltas = [4.643, 7.386, 11.149, 8.704, 7.271, 7.271, 7.271]
-    ranks = [-0.455, -0.194, -0.201, -0.331, -0.377, -0.377, -0.377]
-    massdiffs =  [-0.84, -0.314, -0.277, -0.277, -0.84, -0.84, -0.84]
-    max_pep_lens = [100, 15, 25, 50, 100, 100, 100]
-    num_frags = [2, 2, 3, 4, 6, 6, 6]
-
-    eps = 0.001
-
-    targets = {}
-    decoys = {}
-    t_db = {}
-    d_db = {}
-    with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
-    if "ScanNr" not in l:
-        raise ValueError("No ScanNr field, exitting")
-    if "Charge1" not in l:
-        raise ValueError("No Charge1 field, exitting")
-
-    # spectrum identification key for PIN files
-    sidKey = "ScanNr" # note that this typically denotes retention time
-
-    numPeps = 0
-
-    maxCharge = 1
-    chargeKeys = set([])
-    # look at score key and charge keys
-    scoreKey = ''
-    for i in l:
-        if not i:
-            continue
-        m = i.lower()
-        if m == 'score':
-            scoreKey = i
-        if m[:-1]=='charge':
-            chargeKeys.add(i)
-            maxCharge = max(maxCharge, int(m[-1]))
-
-    if not scoreKey:
-        for i in l:
-            if i and i.lower() == 'xcorr':
-                scoreKey = i            
-
-    # fields we have to keep track of
-    psmKeys = set(["SpecId", "Label", sidKey, scoreKey, "Peptide", "Proteins"])
-    # constKeys = set(["SpecId", "Label", sidKey, scoreKey, "charge", "Peptide", "Proteins"]) # exclude these when reserializing data
-    constKeys = set(["SpecId", "Label", sidKey, scoreKey, "charge", "Peptide", "Proteins", "enzN", "enzC", "enzInt", "deltLCn"]) # exclude these when reserializing data
-    keys = list(set(l.iterkeys()) - constKeys)
-    min_xcorr = min([float(l[scoreKey]) for l in reader]) - eps
-
-    for i, l in enumerate(reader):
-        psmid = l["SpecId"]
-        psmSplit = psmid.split('_')
-        counter = int(psmSplit[1])
-        try:
-            sid = int(l[sidKey])
-        except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
-        charge = 0
-        # look for current PSM, encoded as a one-hot vector
-        for c in chargeKeys:
-            try:
-                charge = int(l[c])
-            except ValueError:
-                print "Could not convert charge %s on line %d to int, exitting" % (l[c], i+1)
-
-            if charge:
-                charge = int(c[-1])
-                break
-
-        assert charge > 0, "No charge denoted with value 1 for PSM on line %d, exitting" % (i+1)
-
-        if l["Label"] == '1':
-            kind = 't'
-        elif l["Label"] == '-1':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be -1 or 1, exitting" % l["Label"]
-            exit(-1)
-
-        ind = charge - 1
-        xcorr = float(l[scoreKey]) - min_xcorr
-        lp = len(l["Peptide"])
-        nl = num_frags[ind] * lp
-        lc = max_pep_lens[ind]
-        nc = num_frags[ind] * lc
-
-        if lp < lc:
-            try:
-                xcorr = math.log(xcorr) / math.log(nl)
-            except ValueError:
-                print "xcorr=%f, nl=%f" % (xcorr, nl)
-        else:
-            try:
-                xcorr = math.log(xcorr) / math.log(nc)
-            except ValueError:
-                print "xcorr=%f, nc=%f" % (xcorr, nc)
-
-        el = []
-        el.append(sid)
-        el.append(xcorr)
-        el.append(charge)
-        el.append(len(l["Peptide"]))
-        for k in keys:
-            if not k:
-                continue
-            el.append(float(l[k]))
-
-        if kind == 't':
-            targets[sid, charge, counter] = el
-            t_db[sid, charge, counter] = l
-            numPeps += 1
-        elif kind == 'd':
-            decoys[sid, charge, counter] = el
-            d_db[sid, charge, counter] = l
-            numPeps += 1
-    print "Evaluated %d PSMs" % numPeps
-    return targets,decoys,t_db,d_db
-
 def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
         the spectrum identification number
@@ -1010,7 +256,6 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     for k in keys:
         featureNames.append(k)
             
-
     targets = {}  # mapping between sids and indices in the feature matrix
     decoys = {}
 
@@ -1040,12 +285,12 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
 
         assert charge > 0, "No charge denoted with value 1 or greater for PSM on line %d, exitting" % (i+1)
 
-        if l["Label"] == '1':
-            kind = 't'
-        elif l["Label"] == '-1':
-            kind = 'd'
-        else:
-            print "Error: encountered label value %s, can only be -1 or 1, exitting" % l["Label"]
+        try:
+            y = int(l["Label"])
+        except ValueError:
+            print "Could not convert label %s on line %d to int, exitting" % (l["Label"], i+1)
+        if y != 1 and y != -1:
+            print "Error: encountered label value %d on line %d, can only be -1 or 1, exitting" % (y, i+1)
             exit(-1)
 
         el = []
@@ -1053,54 +298,55 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
             el.append(charge)
         for k in keys:
             el.append(float(l[k]))
+        
+        if not _topPsm:
+            X.append(el)
+            Y.append(y)
+            pepstrings.append(l["Peptide"][2:-2])
+            sids.append(sid)
+            numRows += 1
+        else:
+            if y == 1:
+                if sid in targets:
+                    featScore = X[targets[sid]][scoreIndex]
+                    if el[scoreIndex] > featScore:
+                        X[targets[sid]] = el
+                        pepstrings[targets[sid]] = l["Peptide"][2:-2]
+                else:
+                    targets[sid] = numRows
+                    X.append(el)
+                    Y.append(1)
+                    pepstrings.append(l["Peptide"][2:-2])
+                    sids.append(sid)
+                    numRows += 1
+            elif y == -1:
+                if sid in decoys:
+                    featScore = X[decoys[sid]][scoreIndex]
+                    if el[scoreIndex] > featScore:
+                        X[decoys[sid]] = el
+                        pepstrings[decoys[sid]] = l["Peptide"][2:-2]
+                else:
+                    decoys[sid] = numRows
+                    X.append(el)
+                    Y.append(-1)
+                    pepstrings.append(l["Peptide"][2:-2])
+                    sids.append(sid)
+                    numRows += 1
 
-        # el = []
-        # # el.append(sid)
-        # el.append(float(l[scoreKey]))
-        # if not oneHotChargeVector:
-        #     el.append(charge)
-        # else:
-        #     for c in chargeKeys:
-        #         el.append(int(l[c]))
-        # el.append(len(l["Peptide"])-4)
-        # for k in keys:
-        #     el.append(float(l[k]))
-
-        # Note: remove taking the max wrt sid below
-        if kind == 't':
-            if sid in targets:
-                featScore = X[targets[sid]][scoreIndex]
-                if el[scoreIndex] > featScore:
-                    X[targets[sid]] = el
-                    pepstrings[targets[sid]] = l["Peptide"][2:-2]
-                    sids[targets[sid]] = sid
-            else:
-                targets[sid] = numRows
-                X.append(el)
-                Y.append(1)
-                pepstrings.append(l["Peptide"][2:-2])
-                sids.append(sid)
-                numRows += 1
-        elif kind == 'd':
-            if sid in decoys:
-                featScore = X[decoys[sid]][scoreIndex]
-                if el[scoreIndex] > featScore:
-                    X[decoys[sid]] = el
-                    pepstrings[decoys[sid]] = l["Peptide"][2:-2]
-                    sids[decoys[sid]] = sid
-            else:
-                decoys[sid] = numRows
-                X.append(el)
-                Y.append(-1)
-                pepstrings.append(l["Peptide"][2:-2])
-                sids.append(sid)
-                numRows += 1
     # Standard-normalize the feature matrix
     if _standardNorm:
-        return targets,decoys, pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
+        return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
     else:
         min_max_scaler = preprocessing.MinMaxScaler()
-        return targets,decoys, pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
+        return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
+
+def sortRowIndicesBySid(sids):
+    """ Sort Scan Identification (SID) keys and retain original row indices of feature matrix X
+    """
+    keySids = sorted(zip(sids, range(len(sids))))
+    xRowIndices = [j for (_,j) in keySids]
+    sids = [i for (i,_) in  keySids]
+    return sids, xRowIndices
 
 def findInitDirection(X, Y, thresh, featureNames):
     l = X.shape
@@ -1193,32 +439,16 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
         kFold += 1
     return scores, initTaq
 
-def doMergeScores(thresh, keys, scores, Y, 
-                  t_scores, d_scores, 
-                  target_rowsToSids, decoy_rowsToSids):
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
+def doMergeScores(thresh, testSets, scores, Y):
     # record new scores as we go
     newScores = np.zeros(scores.shape)
-    for testSids in keys:
-    # for kFold in range(3):
-    #     if kFold < 2:
-    #         testSids = keys[kFold * m : (kFold+1) * m]
-    #     else:
-    #         testSids = keys[kFold * m : ]
-            
+    for testSids in testSets:
         u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
         diff = u - d
         if diff <= 0.:
             diff = 1.
         for ts in testSids:
             newScores[ts] = (scores[ts] - u) / (u-d)
-            if Y[ts] == 1:
-                sid = target_rowsToSids[ts]
-                t_scores[sid] = newScores[ts]
-            else:
-                sid = decoy_rowsToSids[ts]
-                d_scores[sid] = newScores[ts]
     return newScores
 
 def doLda(thresh, keys, scores, X, Y):
@@ -1264,136 +494,25 @@ def doLda(thresh, keys, scores, X, Y):
 
     return newScores, totalTaq
 
-def writeOutput(output, Y, pepstrings,
-                target_rowsToSids, t_scores,
-                decoy_rowsToSids, d_scores):
+def writeOutput(output, scores, Y, pepstrings,sids):
     n = len(Y)
     fid = open(output, 'w')
     fid.write("Kind\tSid\tPeptide\tScore\n")
     counter = 0
     for i in range(n):
+        sid = sids[i]
+        p = pepstrings[i]
+        score = scores[i]
         if Y[i] == 1:
-            sid = target_rowsToSids[i]
-            score = t_scores[sid]
-            p = pepstrings[i]
             fid.write("t\t%d\t%s\t%f\n"
                       % (sid,p,score))
             counter += 1
         else:
-            sid = decoy_rowsToSids[i]
-            score = d_scores[sid]
-            p = pepstrings[i]
             fid.write("d\t%d\t%s\t%f\n"
                       % (sid,p,score))
             counter += 1
     fid.close()
     print "Wrote %d PSMs" % counter
-
-
-def discFunc(options, output):
-    """ Performs LDA using 3 cross-validation bins
-    """
-    q = 0.01
-    f = options.pin
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
-    # X: standard-normalized feature matrix
-    # Y: binary labels, true denoting a target PSM
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
-
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
-
-    l = X.shape
-    n = l[0] # number of instances
-    m = l[1] # number of features
-
-    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
-    keys = range(n)
-
-    
-    random.shuffle(keys)
-    t_scores = {}
-    d_scores = {}
-
-    initTaq = 0.
-    initDir = options.initDirection
-    if initDir > -1 and initDir < m:
-        print "Using specified initial direction %d" % (initDir)
-        # Gather scores
-        scores = X[:,initDir]
-        taq, _, _ = calcQ(scores, Y, q, False)
-        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
-        initTaq += len(taq)
-    else:
-        scores, initTaq = searchForInitialDirection(keys, X, Y, q, featureNames)
-
-    print "Initially could separate %d identifications" % (initTaq) 
-    scores, numIdentified = doLda(q, keys, scores, X, Y)
-    if _mergescore:
-        scores = doMergeScores(q, keys, scores, Y, 
-                               t_scores, d_scores, 
-                               target_rowsToSids, decoy_rowsToSids)
-        
-    print "LDA finished, identified %d targets at q=%.2f" % (numIdentified, q)
-
-    writeOutput(output, Y, pepstrings,
-                target_rowsToSids, t_scores,
-                decoy_rowsToSids, d_scores)
-
-def discFuncIter(options, output):
-    q = 0.01
-    f = options.pin
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
-    # X: standard-normalized feature matrix
-    # Y: binary labels, true denoting a target PSM
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
-    l = X.shape
-    n = l[0] # number of instances
-    m = l[1] # number of features
-
-    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
-    keys = range(n)
-
-    random.shuffle(keys)
-    t_scores = {}
-    d_scores = {}
-
-    initDir = options.initDirection
-    if initDir > -1 and initDir < m:
-        print "Using specified initial direction %d" % (initDir)
-        # Gather scores
-        scores = X[:,initDir]
-        taq, _, _ = calcQ(scores, Y, q, False)
-        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
-    else:
-        scores, initTaq = searchForInitialDirection(keys, X, Y, q, featureNames)
-
-    for i in range(10):
-        scores, numIdentified = doLda(q, keys, scores, X, Y)
-        print "iter %d: %d targets" % (i, numIdentified)
-
-    if _mergescore:
-        scores = doMergeScores(q, keys, scores, Y, 
-                               t_scores, d_scores, 
-                               target_rowsToSids, decoy_rowsToSids)
-
-
-    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
-                decoy_rowsToSids, d_scores)
 
 def doUnsupervisedGmm_1d(thresh, scores, Y, t_scores, d_scores, 
                          target_rowsToSids, decoy_rowsToSids):
@@ -1500,9 +619,7 @@ def ldaGmm(options, output):
     scores, numIdentified = doLda(q, keys, scores, X, Y)
     print "LDA: %d targets identified" % (numIdentified)
     if _mergescore:
-        scores = doMergeScores(q, keys, scores, Y, 
-                               t_scores, d_scores, 
-                               target_rowsToSids, decoy_rowsToSids)
+        scores = doMergeScores(q, keys, scores, Y)
 
     # Perform Unsupervised GMM learning over LDA scores, rescore PSMs using 
     # resulting posterior
@@ -1549,145 +666,6 @@ def gmm(options, output):
     writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
                 decoy_rowsToSids, d_scores)
 
-def doSvm(thresh, keys, scores, X, Y,
-          targetDecoyRatio):
-    """ Train and test SVM on CV bins
-    """
-    totalTaq = 0 # total number of estimated true positives at q-value threshold
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
-    # record new scores as we go
-    newScores = np.zeros(scores.shape)
-    # C for positive and negative classes
-    cposes = [10., 1., 0.1]
-    cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
-
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
-
-        cvBinSids = list( set(keys) - set(testSids) )
-        validateSids = cvBinSids
-
-        # Find training set using q-value analysis
-        taq, daq, _ = calcQ(scores[cvBinSids], Y[cvBinSids], thresh, True)
-        gd = getDecoyIdx(Y, cvBinSids)
-        # Debugging check
-        if _debug and _verb >= 1:
-            print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(trainSids) - len(gd), len(gd), len(taq), len(daq))
-
-        trainSids = list(set(taq) | set(gd))
-
-        features = X[trainSids]
-        labels = Y[trainSids]
-        bestTaq = -1
-        bestCp = cposes[0] * 0.5
-        bestCn = cfracs[0] * bestCp
-        bestClf = []
-        alpha = 0.5
-        # Find cpos and cneg
-        for cpos in cposes:
-            for cfrac in cfracs:
-                cneg = cfrac*cpos
-                classWeight = {1: alpha * cpos, -1: alpha * cneg}
-                clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-20)
-                clf.fit(features, labels)
-                validation_scores = clf.decision_function(X[validateSids])
-                # Calculate true positives
-                tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, False)
-                currentTaq = len(tp)
-                if _debug: # and _verb >= 1:
-                    print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
-                if currentTaq > bestTaq:
-                    bestTaq = currentTaq
-                    bestCp = cpos * alpha
-                    bestCn = cneg * alpha
-                    bestClf = deepcopy(clf)
-
-        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
-        iter_scores = bestClf.decision_function(X[testSids])
-        # Calculate true positives
-        tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
-        totalTaq += len(tp)
-
-        # if _mergescore:
-        #     u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
-        #     iter_scores = (iter_scores - u) / (u-d)
-
-        for i, score in zip(testSids, iter_scores):
-            newScores[i] = score
-
-    return newScores, totalTaq
-
-def doSvmLin(thresh, keys, scores, X, Y,
-             targetDecoyRatio):
-    """ Train and test SVM on CV bins
-    """
-    totalTaq = 0 # total number of estimated true positives at q-value threshold
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
-    # record new scores as we go
-    # newScores = np.zeros(scores.shape)
-    newScores = []
-    clfs = []
-
-    # C for positive and negative classes
-    cposes = [10., 1., 0.1]
-    cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
-    estTaq = 0
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
-
-        cvBinSids = list( set(keys) - set(testSids) )
-        validateSids = cvBinSids
-
-        # Find training set using q-value analysis
-        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
-        gd = getDecoyIdx(Y, cvBinSids)
-        # Debugging check
-        if _debug: #  and _verb >= 1:
-            print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq))
-
-        trainSids = list(set(taq) | set(gd))
-
-        features = X[trainSids]
-        labels = Y[trainSids]
-        bestTaq = -1.
-        bestCp = 1.
-        bestCn = 1.
-        bestClf = []
-        alpha = 1.
-        # Find cpos and cneg
-        for cpos in cposes:
-            for cfrac in cfracs:
-                cneg = cfrac*cpos
-                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
-                validation_scores = np.dot(X[validateSids], clf[:-1]) + clf[-1]
-                tp, _, _ = calcQ(validation_scores, Y[validateSids], thresh, True)
-                currentTaq = len(tp)
-                if _debug and _verb > 1:
-                    print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
-                # if _debug and _verb >= 1:
-                #     print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
-                if currentTaq > bestTaq:
-                    topScores = validation_scores[:]
-                    bestTaq = currentTaq
-                    bestCp = cpos * alpha
-                    bestCn = cneg * alpha
-                    bestClf = deepcopy(clf)
-
-        newScores.append(topScores)
-        clfs.append(bestClf)
-        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
-        estTaq += bestTaq
-    estTaq /= 2
-    return newScores, estTaq, clfs
-
 def calculateTargetDecoyRatio(Y):
     # calculate target-decoy ratio for the given training/testing set with labels Y
     numPos = 0
@@ -1698,7 +676,7 @@ def calculateTargetDecoyRatio(Y):
         else:
             numNeg+=1
 
-    return float(numPos) / max(1., float(numNeg))
+    return float(numPos) / max(1., float(numNeg)), numPos, numNeg
 
 def doTestSvm(thresh, keys, X, Y, ws):
     m = len(keys)/3
@@ -1739,66 +717,6 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
         totalTaq += len(tp)
         kFold += 1
     return testScores, totalTaq
-
-def svmIter(options, output):
-    q = 0.01
-    f = options.pin
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
-    # X: standard-normalized feature matrix
-    # Y: binary labels, true denoting a target PSM
-    oneHotChargeVector = True
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f, oneHotChargeVector)
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
-    l = X.shape
-    n = l[0] # number of instances
-    m = l[1] # number of features
-
-    targetDecoyRatio = calculateTargetDecoyRatio(Y)
-
-    print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (len(target_rows), len(decoy_rows), l[1], targetDecoyRatio)
-    keys = range(n)
-
-    random.shuffle(keys)
-    t_scores = {}
-    d_scores = {}
-
-    initTaq = 0.
-    initDir = options.initDirection
-    if initDir > -1 and initDir < m:
-        print "Using specified initial direction %d" % (initDir)
-        # Gather scores
-        scores = X[:,initDir]
-        taq, _, _ = calcQ(scores, Y, q, False)
-        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
-        initTaq += len(taq)
-    else:
-        scores, initTaq = searchForInitialDirection_split(keys, X, Y, q, featureNames)
-
-    print "Initially could separate %d identifications" % ( initTaq / 2 )
-    for i in range(options.maxIters):
-        scores, numIdentified, ws = doSvmLin(q, keys, scores, X, Y,
-                                            targetDecoyRatio)
-        print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
-    
-    # Calculate test scores
-    testScores, numIdentified = doTestSvm(q, keys, X, Y, ws)
-    print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
-    if _mergescore:
-        scores = doMergeScores(q, keys, testScores, Y, 
-                               t_scores, d_scores, 
-                               target_rowsToSids, decoy_rowsToSids)
-
-    taq, _, _ = calcQ(scores, Y, q, False)
-    print "Could identify %d targets" % (len(taq))
-    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
-                decoy_rowsToSids, d_scores)
 
 def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels):
     """ Perform LDA on a CV bin
@@ -1866,13 +784,6 @@ def doIter(thresh, keys, scores, X, Y,
         tron = True
         alpha = 0.5
     for cvBinSids in keys:
-    # for kFold in range(3):
-    #     if kFold < 2:
-    #         testSids = keys[kFold * m : (kFold+1) * m]
-    #     else:
-    #         testSids = keys[kFold * m : ]
-
-    #     cvBinSids = list( set(keys) - set(testSids) )
         validateSids = cvBinSids
 
         # Find training set using q-value analysis
@@ -1945,33 +856,20 @@ def funcIter(options, output):
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
     oneHotChargeVector = True
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames, sids = load_pin_return_featureMatrix(f, oneHotChargeVector)
+    pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(f, oneHotChargeVector)
+    sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     print X.mean(axis=0)
     print X.std(axis=0)
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
     l = X.shape
     n = l[0] # number of instances
     m = l[1] # number of features
 
-    targetDecoyRatio = calculateTargetDecoyRatio(Y)
-    print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (len(target_rows), len(decoy_rows), l[1], targetDecoyRatio)
+    targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
+    print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio)
 
     if _debug and _verb >= 3:
         print featureNames
-    keySids = sorted(zip(sids, range(len(sids))))
-    keys = [j for (_,j) in keySids]
-    sids = [i for (i,_) in  keySids]
-    trainKeys, testKeys = partitionCvBins(keys, sids)
-    for i in range(3):
-        print len(trainKeys[i]), len(testKeys[i])
-    for i,j in zip(trainKeys, testKeys):
-        print len(i), len(j)
+    trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
 
     t_scores = {}
     d_scores = {}
@@ -1994,14 +892,11 @@ def funcIter(options, output):
     testScores, numIdentified = doTest(q, testKeys, X, Y, ws, isSvmlin)
     print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
     if _mergescore:
-        scores = doMergeScores(q, testKeys, testScores, Y, 
-                               t_scores, d_scores, 
-                               target_rowsToSids, decoy_rowsToSids)
+        scores = doMergeScores(q, testKeys, testScores, Y)
 
     taq, _, _ = calcQ(scores, Y, q, False)
     print "Could identify %d targets" % (len(taq))
-    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
-                decoy_rowsToSids, d_scores)
+    writeOutput(output, scores, Y, pepstrings, sids0)
 
 if __name__ == '__main__':
     parser = optparse.OptionParser()
@@ -2025,21 +920,4 @@ if __name__ == '__main__':
 
     _verb=options.verb
     discOutput = '%s.txt' % (options.filebase)
-    # Recipes:
-
-    # Single step of LDA
-    # discFunc(options, discOutput)
-
-    # Iterative LDA
-    # discFuncIter(options, discOutput)
-
-    # Single step of LDA followed by GMM posterior scoring
-    # ldaGmm(options, discOutput)
-
-    # Unsupervised learning of GMMs
-    # gmm(options, discOutput)
-    # TODO: add q-value post-processing: mix-max and TDC
-    # TODO: write to a better output file format
-
-    # svmIter(options, discOutput)
     funcIter(options, discOutput)
