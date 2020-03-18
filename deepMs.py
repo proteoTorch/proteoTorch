@@ -43,7 +43,7 @@ _verb=3
 _mergescore=True
 _includeNegativesInResult=True
 _standardNorm=True
-_topPsm=True
+_topPsm=False
 # General assumed iterators for lists of score tuples
 _scoreInd=0
 _labelInd=1
@@ -215,8 +215,10 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     """
 
     with open(filename, 'r') as f:
-        reader = [l for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-    l = reader[0]
+        r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
+        headerInOrder = r.fieldnames
+        reader = [l for l in r]
+    l = headerInOrder
     if "ScanNr" not in l:
         raise ValueError("No ScanNr field, exitting")
     if "Charge1" not in l:
@@ -249,7 +251,11 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     else:
         constKeys = set(constKeys) # exclude these when reserializing data
 
-    keys = list(set(l.iterkeys()) - constKeys)
+    keys = []
+    for h in headerInOrder: # keep order of keys intact
+        if h not in constKeys:
+            keys.append(h)
+    
     featureNames = []
     if not oneHotChargeVector:
         featureNames.append("Charge")
@@ -334,11 +340,22 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                     numRows += 1
 
     # Standard-normalize the feature matrix
-    if _standardNorm:
-        return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
-    else:
-        min_max_scaler = preprocessing.MinMaxScaler()
-        return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
+    m= np.mean(X, axis=0)
+    s= np.std(X, axis=0)
+    for i,sd in enumerate(s):
+        if sd <= 0.:
+            s[i] = 1.
+    if _debug and _verb >= 2:
+        print "Feature\tmean\tstd"
+        for i,j,k in zip(featureNames, m, s):
+            print "%s\t%.2e\t%.2e" % (i,j,k)
+    X = (np.array(X) - m) / s
+    return pepstrings, X, np.array(Y), featureNames, sids
+    # if _standardNorm:
+    #     return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
+    # else:
+    #     min_max_scaler = preprocessing.MinMaxScaler()
+    #     return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
 
 def sortRowIndicesBySid(sids):
     """ Sort Scan Identification (SID) keys and retain original row indices of feature matrix X
@@ -350,18 +367,32 @@ def sortRowIndicesBySid(sids):
 
 def findInitDirection(X, Y, thresh, featureNames):
     l = X.shape
-    m = l[1]
+    m = l[1] # number of columns/features
     initDirection = -1
-    numIdentified = 0
+    numIdentified = -1
+    # TODO: add check verifying best direction idetnfies more than -1 spectra, otherwise something
+    # went wrong
+    negBest = False
     for i in range(m):
-        taq, _, _ = calcQ(X[:,i], Y, thresh, True)
-        if len(taq) > numIdentified:
-            initDirection = i
-            numIdentified = len(taq)
-
-        if _debug and _verb >= 2:
-            print "Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq))
-    return initDirection, numIdentified
+        scores = X[:,i]
+        # Check scores multiplied by both 1 and positive -1
+        for checkNegBest in range(2):
+            if checkNegBest==1:
+                taq, _, _ = calcQ(-1. * scores, Y, thresh, True)
+            else:
+                taq, _, _ = calcQ(scores, Y, thresh, True)
+            #     scores *= -1
+            # taq, _, _ = calcQ(scores, Y, thresh, True)
+            if len(taq) > numIdentified:
+                initDirection = i
+                numIdentified = len(taq)
+                negBest = checkNegBest==1
+            if _debug and _verb >= 2:
+                if checkNegBest==1:
+                    print "Direction -%d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq))
+                else:
+                    print "Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq))
+    return initDirection, numIdentified, negBest
 
 def getDecoyIdx(labels, ids):
     return [i for i in ids if labels[i] != 1]
@@ -383,73 +414,11 @@ def searchForInitialDirection(keys, X, Y, q, featureNames):
         trainSids = list(set(keys) - set(testSids))
 
         # Find initial direction
-        initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+        initDir, numIdentified, negBest = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
         initTaq += numIdentified
         print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
-        scores[trainSids] = X[trainSids,initDir]
+        scores[trainSids] = -1. * X[trainSids,initDir]
     return scores, initTaq
-
-def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
-    """ Iterate through cross validation training sets and find initial search directions
-        Returns the scores for the disjoint bins
-    """
-    initTaq = 0.
-    scores = []
-    # split dataset into thirds for testing/training
-    for trainSids in keys:
-    # m = len(keys)/3
-    # for kFold in range(3):
-    #     if kFold < 2:
-    #         testSids = keys[kFold * m : (kFold+1) * m]
-    #     else:
-    #         testSids = keys[kFold * m : ]
-
-    #     trainSids = list(set(keys) - set(testSids))
-        taq, _, _ = calcQ(X[trainSids,initDir], Y[trainSids], q, True)
-        numIdentified = len(taq)
-        initTaq += numIdentified
-        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
-        scores.append(X[trainSids,initDir])
-    return scores, initTaq
-
-def searchForInitialDirection_split(keys, X, Y, q, featureNames):
-    """ Iterate through cross validation training sets and find initial search directions
-        Returns the scores for the disjoint bins
-    """
-    initTaq = 0.
-    scores = []
-    kFold = 0
-    for trainSids in keys:
-    # # split dataset into thirds for testing/training
-    # m = len(keys)/3
-    # for kFold in range(3):
-    #     if kFold < 2:
-    #         testSids = keys[kFold * m : (kFold+1) * m]
-    #     else:
-    #         testSids = keys[kFold * m : ]
-
-    #     trainSids = list(set(keys) - set(testSids))
-
-        # Find initial direction
-        initDir, numIdentified = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
-
-        initTaq += numIdentified
-        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
-        scores.append(X[trainSids,initDir])
-        kFold += 1
-    return scores, initTaq
-
-def doMergeScores(thresh, testSets, scores, Y):
-    # record new scores as we go
-    newScores = np.zeros(scores.shape)
-    for testSids in testSets:
-        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
-        diff = u - d
-        if diff <= 0.:
-            diff = 1.
-        for ts in testSids:
-            newScores[ts] = (scores[ts] - u) / (u-d)
-    return newScores
 
 def doLda(thresh, keys, scores, X, Y):
     """ Perform LDA on CV bins
@@ -493,6 +462,55 @@ def doLda(thresh, keys, scores, X, Y):
             newScores[i] = score
 
     return newScores, totalTaq
+
+def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
+    """ Iterate through cross validation training sets and find initial search directions
+        Returns the scores for the disjoint bins
+    """
+    initTaq = 0.
+    scores = []
+    # Add check for whether scores multiplied by +1 or -1 is best
+    # split dataset into thirds for testing/training
+    for trainSids in keys:
+        taq, _, _ = calcQ(X[trainSids,initDir], Y[trainSids], q, True)
+        numIdentified = len(taq)
+        initTaq += numIdentified
+        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+        scores.append(X[trainSids,initDir])
+    return scores, initTaq
+
+def searchForInitialDirection_split(keys, X, Y, q, featureNames):
+    """ Iterate through cross validation training sets and find initial search directions
+        Returns the scores for the disjoint bins
+    """
+    initTaq = 0.
+    scores = []
+    kFold = 0
+    for trainSids in keys:
+        # Find initial direction
+        initDir, numIdentified, negBest = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+
+        initTaq += numIdentified
+        if negBest:
+            print "CV fold %d: could separate %d PSMs in initial direction -%d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            scores.append(-1 * X[trainSids,initDir])
+        else:
+            print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            scores.append(X[trainSids,initDir])
+        kFold += 1
+    return scores, initTaq
+
+def doMergeScores(thresh, testSets, scores, Y):
+    # record new scores as we go
+    newScores = np.zeros(scores.shape)
+    for testSids in testSets:
+        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+        diff = u - d
+        if diff <= 0.:
+            diff = 1.
+        for ts in testSids:
+            newScores[ts] = (scores[ts] - u) / (u-d)
+    return newScores
 
 def writeOutput(output, scores, Y, pepstrings,sids):
     n = len(Y)
@@ -701,11 +719,6 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
     totalTaq = 0
     kFold = 0
     for testSids in keys:
-    # for kFold in range(3):
-    #     if kFold < 2:
-    #         testSids = keys[kFold * m : (kFold+1) * m]
-    #     else:
-    #         testSids = keys[kFold * m : ]
         w = ws[kFold]
         if svmlin:
             testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
@@ -749,6 +762,8 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
             tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
             if _debug and _verb > 1:
+                if not tron:
+                    print clf
                 print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
             if currentTaq > bestTaq:
                 topScores = validation_scores[:]
@@ -811,8 +826,10 @@ def doIter(thresh, keys, scores, X, Y,
     estTaq /= 2
     return newScores, estTaq, clfs
 
-def doRand(seed):
-    return (seed * 279470273) % 4294967291
+def doRand():
+    global _seed
+    _seed=(_seed * 279470273) % 4294967291
+    return _seed
 
 def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
     trainKeys = []
@@ -821,22 +838,21 @@ def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
         trainKeys.append([])
         testKeys.append([])
     remain = []
-    r = 0
+    r = len(sids) / folds
+    remain.append(len(sids) - (folds-1) * r)
     for i in range(folds-1):
         remain.append(len(sids) / folds)
-        r+=len(sids) / folds
-    remain.append(len(sids) - r)
     prevSid = sids[0]
-    seed = doRand(seed)
-    randIdx = seed % folds
+    # seed = doRand(seed)
+    randIdx = doRand() % folds
     it = 0
     for k,sid in zip(featureMatRowIndices, sids):
         if (sid!=prevSid):
-            seed = doRand(seed)
-            randIdx = seed % folds
+            # seed = doRand(seed)
+            randIdx = doRand() % folds
             while remain[randIdx] <= 0:
-                seed = doRand(seed)
-                randIdx = seed % folds
+                # seed = doRand(seed)
+                randIdx = doRand() % folds
         for i in range(folds):
             if i==randIdx:
                 testKeys[i].append(k)
@@ -858,8 +874,6 @@ def funcIter(options, output):
     oneHotChargeVector = True
     pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(f, oneHotChargeVector)
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
-    print X.mean(axis=0)
-    print X.std(axis=0)
     l = X.shape
     n = l[0] # number of instances
     m = l[1] # number of features
@@ -913,11 +927,11 @@ if __name__ == '__main__':
     (options, args) = parser.parse_args()
 
     # Seed random number generator.  To make shuffling nondeterministic, input seed <= -1
-    if options.seed <= -1:
-        random.seed()
-    else:
-        random.seed(options.seed)
-
+    # if options.seed <= -1:
+    #     random.seed()
+    # else:
+    #     random.seed(options.seed)
+    _seed=options.seed
     _verb=options.verb
     discOutput = '%s.txt' % (options.filebase)
     funcIter(options, discOutput)
