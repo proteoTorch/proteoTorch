@@ -546,158 +546,6 @@ def writeOutput(output, scores, Y, pepstrings,sids):
     fid.close()
     print "Wrote %d PSMs" % counter
 
-def doUnsupervisedGmm_1d(thresh, scores, Y, t_scores, d_scores, 
-                         target_rowsToSids, decoy_rowsToSids):
-    """ Assuming LDA was performed prior to this, or training an unsupervised GMM based on the scores provided in the scores list
-    """
-    # Train Unsupervised GMM
-    clf = mixture.GaussianMixture(n_components=2, covariance_type='diag', init_params = 'random', verbose=2)
-    scores = scores.reshape(len(scores), 1)
-    newScores = np.zeros(shape(scores))
-    clf.fit(scores)
-    posterior_scores = clf.predict_proba(scores)
-    # have to figure out which class corresponds to targets
-    tp, _, _ = calcQ(posterior_scores[:,0], Y, thresh, False)
-    taqa = len(tp)
-    tp, _, _ = calcQ(posterior_scores[:,1], Y, thresh, False)
-    taqb = len(tp)
-    target_class_ind = 1
-    print taqa, taqb, posterior_scores.shape
-    if taqa > taqb:
-        target_class_ind = 0
-    for i, score in enumerate(posterior_scores):
-        newScores[i] = score[target_class_ind]
-        if Y[i] == 1:
-            sid = target_rowsToSids[i]
-            t_scores[sid] = score[target_class_ind]
-        else:
-            sid = decoy_rowsToSids[i]
-            d_scores[sid] = score[target_class_ind]
-    # Calculate true positives
-    tp, _, _ = calcQ(scores, Y, thresh, False)
-    totalTaq = len(tp)
-    return newScores, totalTaq
-
-def doUnsupervisedGmm(thresh, scores, X, Y, t_scores, d_scores, 
-                      target_rowsToSids, decoy_rowsToSids):
-    """ Assuming LDA was performed prior to this, or training an unsupervised GMM based on the scores provided in the scores list
-    """
-    newScores = np.zeros(shape(scores))
-    # Train Unsupervised GMM
-    clf = mixture.GaussianMixture(n_components=2, covariance_type='diag', init_params = 'random', verbose=2)
-    clf.fit(X)
-    posterior_scores = clf.predict_proba(X)
-    # have to figure out which class corresponds to targets
-    tp, _, _ = calcQ(posterior_scores[:,0], Y, thresh, False)
-    taqa = len(tp)
-    tp, _, _ = calcQ(posterior_scores[:,1], Y, thresh, False)
-    taqb = len(tp)
-    target_class_ind = 1
-    print taqa, taqb, posterior_scores.shape
-    if taqa > taqb:
-        target_class_ind = 0
-    for i, score in enumerate(posterior_scores):
-        newScores[i] = score[target_class_ind]
-        if Y[i] == 1:
-            sid = target_rowsToSids[i]
-            t_scores[sid] = score[target_class_ind]
-        else:
-            sid = decoy_rowsToSids[i]
-            d_scores[sid] = score[target_class_ind]
-    # Calculate true positives
-    tp, _, _ = calcQ(scores, Y, thresh, False)
-    totalTaq = len(tp)
-    return newScores, totalTaq
-
-def ldaGmm(options, output):
-    """ Perform LDA followed rescoring using GMM posteriors
-    """
-    q = 0.01
-    f = options.pin
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
-    # X: standard-normalized feature matrix
-    # Y: binary labels, true denoting a target PSM
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
-    l = X.shape
-    n = l[0] # number of instances
-    m = l[1] # number of features
-
-    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
-    keys = range(n)
-
-    random.shuffle(keys)
-    t_scores = {}
-    d_scores = {}
-
-    initDir = options.initDirection
-    if initDir > -1 and initDir < m:
-        print "Using specified initial direction %d" % (initDir)
-        # Gather scores
-        scores = X[:,initDir]
-        taq, _, _ = calcQ(scores, Y, q, False)
-        print "Direction %d, %s: Could separate %d identifications" % (initDir, featureNames[initDir], len(taq))
-    else:
-        scores, initTaq = searchForInitialDirection(keys, X, Y, q, featureNames)
-
-    # Perform LDA
-    scores, numIdentified = doLda(q, keys, scores, X, Y)
-    print "LDA: %d targets identified" % (numIdentified)
-    if _mergescore:
-        scores = doMergeScores(q, keys, scores, Y)
-
-    # Perform Unsupervised GMM learning over LDA scores, rescore PSMs using 
-    # resulting posterior
-    scores, numIdentified = doUnsupervisedGmm_1d(q, scores, Y, 
-                                                 t_scores, d_scores, 
-                                                 target_rowsToSids, decoy_rowsToSids)
-    print "GMM: %d targets identified" % (numIdentified)
-
-    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
-                decoy_rowsToSids, d_scores)
-
-def gmm(options, output):
-    """ Train unsupervised GMM and rescore PSMs using posterior
-    """
-    q = 0.01
-    f = options.pin
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
-    # X: standard-normalized feature matrix
-    # Y: binary labels, true denoting a target PSM
-    target_rows, decoy_rows, pepstrings, X, Y, featureNames = load_pin_return_featureMatrix(f)
-    # get mapping from rows to spectrum ids
-    target_rowsToSids = {}
-    decoy_rowsToSids = {}
-    for tr in target_rows:
-        target_rowsToSids[target_rows[tr]] = tr
-    for dr in decoy_rows:
-        decoy_rowsToSids[decoy_rows[dr]] = dr
-    l = X.shape
-    n = l[0] # number of instances
-    m = l[1] # number of features
-
-    print "Loaded %d target and %d decoy PSMS with %d features" % (len(target_rows), len(decoy_rows), l[1])
-    t_scores = {}
-    d_scores = {}
-    scores = np.zeros(Y.shape)
-    # Perform Unsupervised GMM learning over features, rescore PSMs using 
-    # resulting posterior
-    scores, numIdentified = doUnsupervisedGmm(q, scores, X, Y, 
-                                              t_scores, d_scores, 
-                                              target_rowsToSids, decoy_rowsToSids)
-    print "GMM: %d targets identified" % (numIdentified)
-
-    writeOutput(output, Y, pepstrings,target_rowsToSids, t_scores,
-                decoy_rowsToSids, d_scores)
-
 def calculateTargetDecoyRatio(Y):
     # calculate target-decoy ratio for the given training/testing set with labels Y
     numPos = 0
@@ -709,23 +557,6 @@ def calculateTargetDecoyRatio(Y):
             numNeg+=1
 
     return float(numPos) / max(1., float(numNeg)), numPos, numNeg
-
-def doTestSvm(thresh, keys, X, Y, ws):
-    m = len(keys)/3
-    testScores = np.zeros(Y.shape)
-    totalTaq = 0
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
-        w = ws[kFold]
-        testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
-        
-        # Calculate true positives
-        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
-        totalTaq += len(tp)
-    return testScores, totalTaq
 
 def doTest(thresh, keys, X, Y, ws, svmlin = False):
     m = len(keys)/3
@@ -755,6 +586,66 @@ def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateL
     print "CV finished for fold %d: %d targets identified" % (kFold, len(tp))
     return validation_scores, len(tp), clf
 
+def getPercWeights(currIter, kFold):
+    """ Weights to debug overall pipeline
+        Percolator optimal CV weights worm01.pin
+    """
+    if currIter == 0:
+        if kFold == 0:
+            # cross-validation found 5048 training set PSMs with cpos = 0.1, cneg = 0.3
+            clf = np.array([-0.0259891,0,0.122862,1.99297,-0.205812,0.131589,-0.240002,0.0422103,0.159012,-0.172794,0,0,0,-0.204852,0.00944616,-0.00376582,-3.02847])
+        elif kFold == 1:
+            # cross-validation found 5372 training set PSMs with cpos = 10, cneg = 100
+            clf = np.array([0.0218895,0,0.161915,2.26042,-0.29484,0.21187,-0.0500683,0.0707332,0.258911,-0.282006,0,0,0,-0.0980667,0.0239779,-0.0278971,-3.75857])
+        else:
+            # cross-validation found 5228 training set PSMs with cpos = 0.1, cneg = 1
+            clf = np.array([0.017683,0,0.152919,2.23658,-0.288384,0.248982,-0.350645,0.0369419,0.195835,-0.207899,0,0,0,-0.358095,-0.0027158,-0.0151766,-3.66699])
+    elif currIter == 1:
+        if kFold==0:
+            # cross-validation found 5274 training set PSMs with cpos = 1, cneg = 10
+            clf = np.array([-0.0159667,0,0.258948,2.35891,-0.427149,0.294673,-0.508974,0.110175,0.301756,-0.337725,0,0,0,-0.458718,0.019466,-0.0285029,-4.06692])
+            # Note: tie with the weights commented out below
+            # -0.00508149 0 0.24113 2.01383 -0.363366 0.256272 -0.407882 0.0928448 0.256659 -0.28697 0 0 0 -0.369307 0.0146373 -0.0180445 -3.50038 
+            # - cross-validation found 5247 training set PSMs with cpos = 0.1, cneg = 1
+        elif kFold == 1:
+            # cross-validation found 5519 training set PSMs with cpos = 10, cneg = 30
+            clf = np.array([0.0472272,0,0.284314,2.71909,-0.523136,0.397579,-0.120766,0.139299,0.425898,-0.471377,0,0,0,-0.211426,0.0274639,-0.0304848,-4.05817])
+            # Note: tie with the weights commented out below
+            # 0.0476343 0 0.278298 2.62417 -0.505862 0.389465 -0.116106 0.134484 0.408974 -0.45288 0 0 0 -0.205072 0.0261596 -0.0275075 -3.91696 
+        else:
+            # cross-validation found 5360 training set PSMs with cpos = 1, cneg = 3
+            clf = np.array([0.0387359,0,0.314553,2.8278,-0.51302,0.434318,-0.65393,0.086333,0.365803,-0.393993,0,0,0,-0.644954,-0.00481508,-0.0170554,-4.6971])
+            # Note: tie with the weights commented out below
+            # 0.0418418 0 0.273516 2.18986 -0.382262 0.335036 -0.415145 0.0634514 0.268413 -0.289132 0 0 0 -0.389397 -0.00203847 0.000585443 -3.34466 
+    elif currIter == 2:
+        if kFold == 0:
+            # - cross-validation found 5309 training set PSMs with cpos = 1, cneg = 1
+            clf = np.array([-0.00843064,0,0.359603,2.68549,-0.539473,0.405523,-0.570098,0.155218,0.383265,-0.433937,0,0,0,-0.530636,0.0150884,-0.0371239,-4.02487])
+        elif kFold == 1:
+            # - cross-validation found 5541 training set PSMs with cpos = 10, cneg = 30
+            clf = np.array([0.0556515,0,0.34885,2.64609,-0.60046,0.489418,-0.143493,0.198406,0.476925,-0.541695,0,0,0,-0.288446,0.0374692,-0.0266473,-4.09366])
+            # Note: tie with the weights commented out below
+            # 0.0556794 0 0.341036 2.55943 -0.580531 0.47699 -0.140124 0.191905 0.457938 -0.520586 0 0 0 -0.27987 0.0359987 -0.0240579 -3.95761 
+        else:
+            # - cross-validation found 5431 training set PSMs with cpos = 10, cneg = 100
+            clf = np.array([0.0622362,0,0.402447,2.75538,-0.552603,0.447494,-0.73275,0.129017,0.430558,-0.472681,0,0,0,-0.695651,-0.0159191,-0.0226761,-4.75368])
+            # Note: tie with the weights commented out below
+            # 0.0828503 0 0.429292 3.01126 -0.607536 0.498555 -0.727165 0.118851 0.447518 -0.486324 0 0 0 -0.709421 -0.0121971 -0.00850306 -4.42439 
+    elif currIter == 3:
+        if kFold == 0:
+            # - cross-validation found 5313 training set PSMs with cpos = 0.1, cneg = 1
+            clf = np.array([0.020168,0,0.330994,1.89207,-0.404563,0.315711,-0.446399,0.143083,0.291405,-0.338112,0,0,0,-0.428735,0.00302618,-0.0356007,-3.46502])
+        elif kFold == 1:
+            # - cross-validation found 5538 training set PSMs with cpos = 0.1, cneg = 0.1
+            clf = np.array([0.0660606,0,0.3263,2.00057,-0.477043,0.443968,-0.0596892,0.17502,0.335177,-0.39231,0,0,0,-0.207732,0.0317964,-0.00492672,-2.8646])
+        else:
+            # - cross-validation found 5450 training set PSMs with cpos = 0.1, cneg = 0.3
+            clf = np.array([0.0701129,0,0.387639,2.10595,-0.460141,0.399405,-0.462105,0.100854,0.321063,-0.35399,0,0,0,-0.450039,-0.0191531,-0.00581594,-3.3918])
+    else:
+        raise ValueError("%d iteration weights called for, only four iterations of weights available, exitting." % (currIter))
+    return clf
+    
+
 def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateLabels, 
                     cposes, cfracs, alpha, tron = True, currIter=1):
     bestTaq = -1.
@@ -771,27 +662,12 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(validateFeatures)
             else:
-                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
-                # if currIter ==0:
-                #     if kFold==0:
-                #         clf = np.array([-0.0259891,0,0.122862,1.99297,-0.205812,0.131589,-0.240002,0.0422103,0.159012,-0.172794,0,0,0,-0.204852,0.00944616,-0.00376582,-3.02847])
-                #     elif kFold == 1:
-                #         clf = np.array([0.0218895,0,0.161915,2.26042,-0.29484,0.21187,-0.0500683,0.0707332,0.258911,-0.282006,0,0,0,-0.0980667,0.0239779,-0.0278971,-3.75857])
-                #     else:
-                #         clf = np.array([0.017683,0,0.152919,2.23658,-0.288384,0.248982,-0.350645,0.0369419,0.195835,-0.207899,0,0,0,-0.358095,-0.0027158,-0.0151766,-3.66699])
-                # else:
-                #     if kFold==0:
-                #         clf = np.array([-0.0159667,0,0.258948,2.35891,-0.427149,0.294673,-0.508974,0.110175,0.301756,-0.337725,0,0,0,-0.458718,0.019466,-0.0285029,-4.06692])
-                #     elif kFold == 1:
-                #         clf = np.array([0.0472272,0,0.284314,2.71909,-0.523136,0.397579,-0.120766,0.139299,0.425898,-0.471377,0,0,0,-0.211426,0.0274639,-0.0304848,-4.05817])
-                #     else:
-                #         clf = np.array([0.0387359,0,0.314553,2.8278,-0.51302,0.434318,-0.65393,0.086333,0.365803,-0.393993,0,0,0,-0.644954,-0.00481508,-0.0170554,-4.6971])
+                clf = getPercWeights(currIter, kFold)
+                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
             if _debug and _verb > 1:
-                if not tron:
-                    print clf
                 print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
             if currentTaq > bestTaq:
                 topScores = validation_scores[:]
@@ -810,8 +686,6 @@ def doIter(thresh, keys, scores, X, Y,
         Method 2: SVM, solver SVMLIN
     """
     totalTaq = 0 # total number of estimated true positives at q-value threshold
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []

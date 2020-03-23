@@ -10,9 +10,8 @@ import sys
 try: 
         dirname = path.dirname(path.abspath(__file__))
         libssl = CDLL(path.join(dirname, 'libssl.so'))
-        print 'libssl library loaded.'
 except:
-        raise Exception('LIBSSL library not found')
+        raise Exception('libssl.so not found')
 
 def genFields(names, types):
 	return list(zip(names, types))
