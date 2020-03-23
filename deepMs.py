@@ -39,7 +39,7 @@ from svmlin import svmlin
 ################### Global variables
 #########################################################
 _debug=True
-_verb=3
+_verb=0
 _mergescore=True
 _includeNegativesInResult=True
 _standardNorm=True
@@ -339,23 +339,24 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                     sids.append(sid)
                     numRows += 1
 
-    # Standard-normalize the feature matrix
-    m= np.mean(X, axis=0)
-    s= np.std(X, axis=0)
-    for i,sd in enumerate(s):
-        if sd <= 0.:
-            s[i] = 1.
-    if _debug and _verb >= 2:
-        print "Feature\tmean\tstd"
-        for i,j,k in zip(featureNames, m, s):
-            print "%s\t%.2e\t%.2e" % (i,j,k)
-    X = (np.array(X) - m) / s
-    return pepstrings, X, np.array(Y), featureNames, sids
-    # if _standardNorm:
-    #     return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
-    # else:
-    #     min_max_scaler = preprocessing.MinMaxScaler()
-    #     return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
+    # # Standard-normalize the feature matrix
+    # m= np.mean(X, axis=0)
+    # s= np.std(X, axis=0)
+    # for i,sd in enumerate(s):
+    #     if sd <= 0.:
+    #         s[i] = 1.
+    # if _debug and _verb >= 2:
+    #     print "Feature\tmean\tstd"
+    #     for i,j,k in zip(featureNames, m, s):
+    #         print "%s\t%.2e\t%.2e" % (i,j,k)
+    # X = (np.array(X) - m) / s
+    # return pepstrings, X, np.array(Y), featureNames, sids
+
+    if _standardNorm:
+        return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
+    else:
+        min_max_scaler = preprocessing.MinMaxScaler()
+        return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
 
 def sortRowIndicesBySid(sids):
     """ Sort Scan Identification (SID) keys and retain original row indices of feature matrix X
@@ -381,8 +382,6 @@ def findInitDirection(X, Y, thresh, featureNames):
                 taq, _, _ = calcQ(-1. * scores, Y, thresh, True)
             else:
                 taq, _, _ = calcQ(scores, Y, thresh, True)
-            #     scores *= -1
-            # taq, _, _ = calcQ(scores, Y, thresh, True)
             if len(taq) > numIdentified:
                 initDirection = i
                 numIdentified = len(taq)
@@ -471,12 +470,27 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
     scores = []
     # Add check for whether scores multiplied by +1 or -1 is best
     # split dataset into thirds for testing/training
-    for trainSids in keys:
-        taq, _, _ = calcQ(X[trainSids,initDir], Y[trainSids], q, True)
-        numIdentified = len(taq)
+    for kFold, trainSids in enumerate(keys):
+        currScores = X[trainSids,initDir]
+        numIdentified = -1
+        negBest = False
+        # Check scores multiplied by both 1 and positive -1
+        for checkNegBest in range(2):
+            if checkNegBest==1:
+                taq, _, _ = calcQ(-1. * currScores, Y[trainSids], q, True)
+            else:
+                taq, _, _ = calcQ(currScores, Y[trainSids], q, True)
+            if len(taq) > numIdentified:
+                numIdentified = len(taq)
+                negBest = checkNegBest==1
+
         initTaq += numIdentified
-        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
-        scores.append(X[trainSids,initDir])
+        if negBest:
+            print "CV fold %d: could separate %d PSMs in supplied initial direction -%d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            scores.append(-1. * currScores)
+        else:
+            print "CV fold %d: could separate %d PSMs in supplied initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            scores.append(currScores)
     return scores, initTaq
 
 def searchForInitialDirection_split(keys, X, Y, q, featureNames):
@@ -493,7 +507,7 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
         initTaq += numIdentified
         if negBest:
             print "CV fold %d: could separate %d PSMs in initial direction -%d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
-            scores.append(-1 * X[trainSids,initDir])
+            scores.append(-1. * X[trainSids,initDir])
         else:
             print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
             scores.append(X[trainSids,initDir])
@@ -742,7 +756,7 @@ def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateL
     return validation_scores, len(tp), clf
 
 def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateLabels, 
-                    cposes, cfracs, alpha, tron = True):
+                    cposes, cfracs, alpha, tron = True, currIter=1):
     bestTaq = -1.
     bestCp = 1.
     bestCn = 1.
@@ -758,6 +772,20 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 validation_scores = clf.decision_function(validateFeatures)
             else:
                 clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                # if currIter ==0:
+                #     if kFold==0:
+                #         clf = np.array([-0.0259891,0,0.122862,1.99297,-0.205812,0.131589,-0.240002,0.0422103,0.159012,-0.172794,0,0,0,-0.204852,0.00944616,-0.00376582,-3.02847])
+                #     elif kFold == 1:
+                #         clf = np.array([0.0218895,0,0.161915,2.26042,-0.29484,0.21187,-0.0500683,0.0707332,0.258911,-0.282006,0,0,0,-0.0980667,0.0239779,-0.0278971,-3.75857])
+                #     else:
+                #         clf = np.array([0.017683,0,0.152919,2.23658,-0.288384,0.248982,-0.350645,0.0369419,0.195835,-0.207899,0,0,0,-0.358095,-0.0027158,-0.0151766,-3.66699])
+                # else:
+                #     if kFold==0:
+                #         clf = np.array([-0.0159667,0,0.258948,2.35891,-0.427149,0.294673,-0.508974,0.110175,0.301756,-0.337725,0,0,0,-0.458718,0.019466,-0.0285029,-4.06692])
+                #     elif kFold == 1:
+                #         clf = np.array([0.0472272,0,0.284314,2.71909,-0.523136,0.397579,-0.120766,0.139299,0.425898,-0.471377,0,0,0,-0.211426,0.0274639,-0.0304848,-4.05817])
+                #     else:
+                #         clf = np.array([0.0387359,0,0.314553,2.8278,-0.51302,0.434318,-0.65393,0.086333,0.365803,-0.393993,0,0,0,-0.644954,-0.00481508,-0.0170554,-4.6971])
                 validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
@@ -775,7 +803,7 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
     return topScores, bestTaq, bestClf
 
 def doIter(thresh, keys, scores, X, Y,
-           targetDecoyRatio, method = 0):
+           targetDecoyRatio, method = 0, currIter=1):
     """ Train a classifier on CV bins.
         Method 0: LDA
         Method 1: SVM, solver TRON
@@ -800,7 +828,6 @@ def doIter(thresh, keys, scores, X, Y,
         alpha = 0.5
     for cvBinSids in keys:
         validateSids = cvBinSids
-
         # Find training set using q-value analysis
         taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
         gd = getDecoyIdx(Y, cvBinSids)
@@ -808,7 +835,8 @@ def doIter(thresh, keys, scores, X, Y,
         if _debug: #  and _verb >= 1:
             print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq))
 
-        trainSids = list(set(taq) | set(gd))
+        # trainSids = list(set(taq) | set(gd))
+        trainSids = gd + taq
 
         features = X[trainSids]
         labels = Y[trainSids]
@@ -818,7 +846,7 @@ def doIter(thresh, keys, scores, X, Y,
             topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels)
         else:
             topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validateFeatures, validateLabels,
-                                                          cposes, cfracs, alpha, tron)
+                                                          cposes, cfracs, alpha, tron, currIter)
         newScores.append(topScores)
         clfs.append(bestClf)
         estTaq += bestTaq
@@ -899,7 +927,7 @@ def funcIter(options, output):
     print "Could initially separate %d identifications" % ( initTaq / 2 )
     for i in range(options.maxIters):
         scores, numIdentified, ws = doIter(q, trainKeys, scores, X, Y,
-                                           targetDecoyRatio, options.method)
+                                           targetDecoyRatio, options.method, i)
         print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
     
     isSvmlin = (options.method==2)
