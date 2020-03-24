@@ -44,6 +44,8 @@ _mergescore=True
 _includeNegativesInResult=True
 _standardNorm=True
 _topPsm=False
+_convergeCheck=False
+_reqIncOver2Iters=0.01
 # General assumed iterators for lists of score tuples
 _scoreInd=0
 _labelInd=1
@@ -181,7 +183,7 @@ def getQValues(pi0, combined, skipDecoysPlusOne = False):
     # Below is equivalent to: partial_sum(qvals.rbegin(), qvals.rend(), qvals.rbegin(), min);
     return list(accumulate(qvals[::-1], min))[::-1]
     
-def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = True):
+def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     """Returns q-values and the indices of the positive class such that q <= thresh
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
@@ -662,12 +664,12 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(validateFeatures)
             else:
-                clf = getPercWeights(currIter, kFold)
-                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                # clf = getPercWeights(currIter, kFold)
+                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
-            if _debug and _verb > 1:
+            if _debug and _verb > 2:
                 print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
             if currentTaq > bestTaq:
                 topScores = validation_scores[:]
@@ -675,6 +677,8 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 bestCp = cpos * alpha
                 bestCn = cneg * alpha
                 bestClf = deepcopy(clf)
+    tp, _, _ = calcQ(topScores, validateLabels, thresh)
+    bestTaq = len(tp)
     print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
     return topScores, bestTaq, bestClf
 
@@ -682,8 +686,8 @@ def doIter(thresh, keys, scores, X, Y,
            targetDecoyRatio, method = 0, currIter=1):
     """ Train a classifier on CV bins.
         Method 0: LDA
-        Method 1: SVM, solver TRON
-        Method 2: SVM, solver SVMLIN
+        Method 1: linear SVM, solver TRON
+        Method 2: linear SVM, solver SVMLIN
     """
     totalTaq = 0 # total number of estimated true positives at q-value threshold
     # record new scores as we go
@@ -706,7 +710,7 @@ def doIter(thresh, keys, scores, X, Y,
         taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
         gd = getDecoyIdx(Y, cvBinSids)
         # Debugging check
-        if _debug: #  and _verb >= 1:
+        if _debug and _verb >= 1:
             print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq))
 
         # trainSids = list(set(taq) | set(gd))
@@ -797,12 +801,21 @@ def funcIter(options, output):
         scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
     else:
         scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames)
-
     print "Could initially separate %d identifications" % ( initTaq / 2 )
+
+    # Iteratre
+    fp = 0 # current number of identifications
+    fpo = 0 # number of identifications from previous iteration
+    fpoo = 0 # number of identifications from previous, previous iteration
     for i in range(options.maxIters):
-        scores, numIdentified, ws = doIter(q, trainKeys, scores, X, Y,
+        scores, fp, ws = doIter(q, trainKeys, scores, X, Y,
                                            targetDecoyRatio, options.method, i)
-        print "iter %d: estimated %d targets <= %f" % (i, numIdentified, q)
+        print "Iter %d: estimated %d targets <= q = %f" % (i, fp, q)
+        if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
+            print "Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo)
+            break
+        fpoo = fpo
+        fpo = fp
     
     isSvmlin = (options.method==2)
     testScores, numIdentified = doTest(q, testKeys, X, Y, ws, isSvmlin)

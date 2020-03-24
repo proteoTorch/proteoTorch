@@ -59,37 +59,24 @@ int CGLS(const struct data *Data,
   double *z = new double[active];
   double *q = new double[active];
   int ii=0;
-  for(int i = active ; i-- ;){
+  register int i,j; 
+  for(i = active ; i-- ;){
     ii=J[i];      
     z[i]  = C[ii]*(Y[ii] - o[ii]);
   }
   double *r = new double[n];
-  for(int i = n ; i-- ;)
+  for(i = n ; i-- ;)
     r[i] = 0.0;
-  for(register int j=0; j < active; j++)
-    {
+  for(j=0; j < active; j++){
       ii=J[j];
-      for (register int i = n - 1; i--;) {
+      for (i = n - 1; i--;) {
 	r[i] += set[i + ii*n] * z[j];
       }
       r[n - 1] += z[j];
-
-      // double* val = set[J[j]];
-      // for (register int i = n - 1; i--;) {
-      // 	r[i] += val[i] * z[j];
-      // }
-      // r[n - 1] += z[j];
-
-      // for(register int i=row[ii]; i < row[ii+1]; i++){
-      // 	if(col[i]==(n-1))
-      // 	  r[n-1] += z[j];
-      // 	else
-      // 	  r[col[i]]+=val[i]*z[j];
-      // }
-    }
+  }
   double *p = new double[n];   
   double omega1 = 0.0;
-  for(int i = n ; i-- ;)
+  for(i = n ; i-- ;)
     {
       r[i] -= lambda_l*beta[i];
       p[i] = r[i];
@@ -110,7 +97,6 @@ int CGLS(const struct data *Data,
       cgiter++;
       omega_q=0.0;
       double t=0.0;
-      register int i,j; 
       for(i=0; i < active; i++)
 	{
 	  ii=J[i];
