@@ -36,7 +36,9 @@ from sklearn import mixture
 from svmlin import svmlin
 
 #########################################################
+#########################################################
 ################### Global variables
+#########################################################
 #########################################################
 _debug=True
 _verb=0
@@ -51,6 +53,11 @@ _scoreInd=0
 _labelInd=1
 _indInd=2 # Used to keep track of feature matrix rows when sorting based on score
 
+#########################################################
+#########################################################
+################### CV-bin score normalization
+#########################################################
+#########################################################
 def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     """ Returns the minimal score which achieves the specified threshold and the
         median decoy score from the set
@@ -79,6 +86,23 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
         d = dScores[max(0,len(dScores) / 2)]
     return u, d
 
+def doMergeScores(thresh, testSets, scores, Y):
+    # record new scores as we go
+    newScores = np.zeros(scores.shape)
+    for testSids in testSets:
+        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+        diff = u - d
+        if diff <= 0.:
+            diff = 1.
+        for ts in testSids:
+            newScores[ts] = (scores[ts] - u) / (u-d)
+    return newScores
+
+#########################################################
+#########################################################
+################### Q-value estimation functions
+#########################################################
+#########################################################
 # From itertools, https://docs.python.org/3/library/itertools.html#itertools.accumulate
 def accumulate(iterable, func=operator.add, initial=None):
     'Return running totals'
@@ -97,8 +121,8 @@ def accumulate(iterable, func=operator.add, initial=None):
         total = func(total, element)
         yield total
 
+###### TODO: add calculation of pi0 for q-value re-estimation after PSM rescoring
 # def findpi0():
-    
 
 ## This is a reimplementation of
 #   Crux/src/app/AssignConfidenceApplication.cpp::compute_decoy_qvalues_mixmax
@@ -208,6 +232,32 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
                 daq.append(curr_og_idx)
     return taq,daq, [qvals[i] for _,_,i in allScores]
 
+def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
+    """Returns q-values and the number of identified spectra at each q-value
+    """
+    assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
+    # allScores: list of triples consisting of score, label, and index
+    allScores = zip(scores,labels, range(len(scores)))
+    #--- sort descending
+    allScores.sort(reverse=True)
+    pi0 = 1.
+    qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
+    
+    posTot = 0
+    ps = []
+    for idx, q in enumerate(qvals):
+        curr_label = allScores[idx][1]
+        curr_og_idx = allScores[idx][2]
+        if curr_label == 1:
+            postTot += 1
+        ps.append(posTot)
+    return qvals, ps
+
+#########################################################
+#########################################################
+################### I/O functions
+#########################################################
+#########################################################
 def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
         the spectrum identification number
@@ -360,14 +410,31 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
         min_max_scaler = preprocessing.MinMaxScaler()
         return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
 
-def sortRowIndicesBySid(sids):
-    """ Sort Scan Identification (SID) keys and retain original row indices of feature matrix X
-    """
-    keySids = sorted(zip(sids, range(len(sids))))
-    xRowIndices = [j for (_,j) in keySids]
-    sids = [i for (i,_) in  keySids]
-    return sids, xRowIndices
+def writeOutput(output, scores, Y, pepstrings,sids):
+    n = len(Y)
+    fid = open(output, 'w')
+    fid.write("Kind\tSid\tPeptide\tScore\n")
+    counter = 0
+    for i in range(n):
+        sid = sids[i]
+        p = pepstrings[i]
+        score = scores[i]
+        if Y[i] == 1:
+            fid.write("t\t%d\t%s\t%f\n"
+                      % (sid,p,score))
+            counter += 1
+        else:
+            fid.write("d\t%d\t%s\t%f\n"
+                      % (sid,p,score))
+            counter += 1
+    fid.close()
+    print "Wrote %d PSMs" % counter
 
+#########################################################
+#########################################################
+################### Initial score direction functions
+#########################################################
+#########################################################
 def findInitDirection(X, Y, thresh, featureNames):
     l = X.shape
     m = l[1] # number of columns/features
@@ -394,75 +461,6 @@ def findInitDirection(X, Y, thresh, featureNames):
                 else:
                     print "Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq))
     return initDirection, numIdentified, negBest
-
-def getDecoyIdx(labels, ids):
-    return [i for i in ids if labels[i] != 1]
-
-def searchForInitialDirection(keys, X, Y, q, featureNames):
-    """ Iterate through cross validation training sets and find initial search directions
-        Returns the scores for the disjoint bins
-    """
-    initTaq = 0.
-    scores = np.zeros(Y.shape)
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
-
-        trainSids = list(set(keys) - set(testSids))
-
-        # Find initial direction
-        initDir, numIdentified, negBest = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
-        initTaq += numIdentified
-        print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
-        scores[trainSids] = -1. * X[trainSids,initDir]
-    return scores, initTaq
-
-def doLda(thresh, keys, scores, X, Y):
-    """ Perform LDA on CV bins
-    """
-    totalTaq = 0 # total number of estimated true positives at q-value threshold
-    # split dataset into thirds for testing/training
-    m = len(keys)/3
-    # record new scores as we go
-    newScores = np.zeros(scores.shape)
-    for kFold in range(3):
-        if kFold < 2:
-            testSids = keys[kFold * m : (kFold+1) * m]
-        else:
-            testSids = keys[kFold * m : ]
-
-        trainSids = list(set(keys) - set(testSids))
-
-        taq, daq, _ = calcQ(scores[trainSids], Y[trainSids], thresh, True)
-        # Debugging check
-        if _debug and _verb >= 1:
-            gd = getDecoyIdx(Y, trainSids)
-            print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(trainSids) - len(gd), len(gd), len(taq), len(daq))
-
-        trainSids = list(set(taq) | set(getDecoyIdx(Y, trainSids)))
-
-        features = X[trainSids]
-        labels = Y[trainSids]
-        clf = lda()
-        clf.fit(features, labels)
-
-        iter_scores = clf.decision_function(X[testSids])
-        # Calculate true positives
-        tp, _, _ = calcQ(iter_scores, Y[testSids], thresh, False)
-        totalTaq += len(tp)
-
-        # if _mergescore:
-        #     u, d = qMedianDecoyScore(iter_scores, Y[testSids], thresh = 0.01)
-        #     iter_scores = (iter_scores - u) / (u-d)
-
-        for i, score in zip(testSids, iter_scores):
-            newScores[i] = score
-
-    return newScores, totalTaq
 
 def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
     """ Iterate through cross validation training sets and find initial search directions
@@ -516,38 +514,11 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
         kFold += 1
     return scores, initTaq
 
-def doMergeScores(thresh, testSets, scores, Y):
-    # record new scores as we go
-    newScores = np.zeros(scores.shape)
-    for testSids in testSets:
-        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
-        diff = u - d
-        if diff <= 0.:
-            diff = 1.
-        for ts in testSids:
-            newScores[ts] = (scores[ts] - u) / (u-d)
-    return newScores
-
-def writeOutput(output, scores, Y, pepstrings,sids):
-    n = len(Y)
-    fid = open(output, 'w')
-    fid.write("Kind\tSid\tPeptide\tScore\n")
-    counter = 0
-    for i in range(n):
-        sid = sids[i]
-        p = pepstrings[i]
-        score = scores[i]
-        if Y[i] == 1:
-            fid.write("t\t%d\t%s\t%f\n"
-                      % (sid,p,score))
-            counter += 1
-        else:
-            fid.write("d\t%d\t%s\t%f\n"
-                      % (sid,p,score))
-            counter += 1
-    fid.close()
-    print "Wrote %d PSMs" % counter
-
+#########################################################
+#########################################################
+################### Utility functions
+#########################################################
+#########################################################
 def calculateTargetDecoyRatio(Y):
     # calculate target-decoy ratio for the given training/testing set with labels Y
     numPos = 0
@@ -560,24 +531,60 @@ def calculateTargetDecoyRatio(Y):
 
     return float(numPos) / max(1., float(numNeg)), numPos, numNeg
 
-def doTest(thresh, keys, X, Y, ws, svmlin = False):
-    m = len(keys)/3
-    testScores = np.zeros(Y.shape)
-    totalTaq = 0
-    kFold = 0
-    for testSids in keys:
-        w = ws[kFold]
-        if svmlin:
-            testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
-        else:
-            testScores[testSids] = w.decision_function(X[testSids])
-        
-        # Calculate true positives
-        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
-        totalTaq += len(tp)
-        kFold += 1
-    return testScores, totalTaq
+def sortRowIndicesBySid(sids):
+    """ Sort Scan Identification (SID) keys and retain original row indices of feature matrix X
+    """
+    keySids = sorted(zip(sids, range(len(sids))))
+    xRowIndices = [j for (_,j) in keySids]
+    sids = [i for (i,_) in  keySids]
+    return sids, xRowIndices
 
+def getDecoyIdx(labels, ids):
+    return [i for i in ids if labels[i] != 1]
+
+def doRand():
+    global _seed
+    _seed=(_seed * 279470273) % 4294967291
+    return _seed
+
+def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
+    trainKeys = []
+    testKeys = []
+    for i in range(folds):
+        trainKeys.append([])
+        testKeys.append([])
+    remain = []
+    r = len(sids) / folds
+    remain.append(len(sids) - (folds-1) * r)
+    for i in range(folds-1):
+        remain.append(len(sids) / folds)
+    prevSid = sids[0]
+    # seed = doRand(seed)
+    randIdx = doRand() % folds
+    it = 0
+    for k,sid in zip(featureMatRowIndices, sids):
+        if (sid!=prevSid):
+            # seed = doRand(seed)
+            randIdx = doRand() % folds
+            while remain[randIdx] <= 0:
+                # seed = doRand(seed)
+                randIdx = doRand() % folds
+        for i in range(folds):
+            if i==randIdx:
+                testKeys[i].append(k)
+            else:
+                trainKeys[i].append(k)
+
+        remain[randIdx] -= 1
+        prevSid = sid
+        it += 1
+    return trainKeys, testKeys
+
+#########################################################
+#########################################################
+################### Training algorithms
+#########################################################
+#########################################################
 def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels):
     """ Perform LDA on a CV bin
     """
@@ -590,7 +597,7 @@ def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateL
 
 def getPercWeights(currIter, kFold):
     """ Weights to debug overall pipeline
-        Percolator optimal CV weights worm01.pin
+        Percolator optimal CV weights for worm01.pin
     """
     if currIter == 0:
         if kFold == 0:
@@ -682,6 +689,34 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
     print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
     return topScores, bestTaq, bestClf
 
+#########################################################
+#########################################################
+################### Calculate test scores
+#########################################################
+#########################################################
+def doTest(thresh, keys, X, Y, ws, svmlin = False):
+    m = len(keys)/3
+    testScores = np.zeros(Y.shape)
+    totalTaq = 0
+    kFold = 0
+    for testSids in keys:
+        w = ws[kFold]
+        if svmlin:
+            testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
+        else:
+            testScores[testSids] = w.decision_function(X[testSids])
+        
+        # Calculate true positives
+        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
+        totalTaq += len(tp)
+        kFold += 1
+    return testScores, totalTaq
+
+#########################################################
+#########################################################
+################### Main training functions
+#########################################################
+#########################################################
 def doIter(thresh, keys, scores, X, Y,
            targetDecoyRatio, method = 0, currIter=1):
     """ Train a classifier on CV bins.
@@ -731,44 +766,6 @@ def doIter(thresh, keys, scores, X, Y,
         kFold += 1
     estTaq /= 2
     return newScores, estTaq, clfs
-
-def doRand():
-    global _seed
-    _seed=(_seed * 279470273) % 4294967291
-    return _seed
-
-def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
-    trainKeys = []
-    testKeys = []
-    for i in range(folds):
-        trainKeys.append([])
-        testKeys.append([])
-    remain = []
-    r = len(sids) / folds
-    remain.append(len(sids) - (folds-1) * r)
-    for i in range(folds-1):
-        remain.append(len(sids) / folds)
-    prevSid = sids[0]
-    # seed = doRand(seed)
-    randIdx = doRand() % folds
-    it = 0
-    for k,sid in zip(featureMatRowIndices, sids):
-        if (sid!=prevSid):
-            # seed = doRand(seed)
-            randIdx = doRand() % folds
-            while remain[randIdx] <= 0:
-                # seed = doRand(seed)
-                randIdx = doRand() % folds
-        for i in range(folds):
-            if i==randIdx:
-                testKeys[i].append(k)
-            else:
-                trainKeys[i].append(k)
-
-        remain[randIdx] -= 1
-        prevSid = sid
-        it += 1
-    return trainKeys, testKeys
 
 def funcIter(options, output):
     q = options.q
