@@ -40,12 +40,15 @@ from svmlin import svmlin
 ################### Global variables
 #########################################################
 #########################################################
+_identOutput=False
 _debug=True
 _verb=0
 _mergescore=True
 _includeNegativesInResult=True
 _standardNorm=True
+# Take max wrt sid (TODO: change key from sid to sid+exp_mass)
 _topPsm=False
+# Check if training has converged over past two iterations
 _convergeCheck=False
 _reqIncOver2Iters=0.01
 # General assumed iterators for lists of score tuples
@@ -124,9 +127,7 @@ def accumulate(iterable, func=operator.add, initial=None):
 ###### TODO: add calculation of pi0 for q-value re-estimation after PSM rescoring
 # def findpi0():
 
-## This is a reimplementation of
-#   Crux/src/app/AssignConfidenceApplication.cpp::compute_decoy_qvalues_mixmax
-# Which itself was a reimplementation of Uri Keich's code written in R.
+## This is a reimplementation of Uri Keich's code written in R.
 #
 # Assumes that scores are sorted in descending order
 #
@@ -249,7 +250,7 @@ def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = Fal
         curr_label = allScores[idx][1]
         curr_og_idx = allScores[idx][2]
         if curr_label == 1:
-            postTot += 1
+            posTot += 1
         ps.append(posTot)
     return qvals, ps
 
@@ -356,11 +357,12 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
             el.append(charge)
         for k in keys:
             el.append(float(l[k]))
-        
+
+        el_strings = (l["SpecId"], l["Peptide"], l["Proteins"])
         if not _topPsm:
             X.append(el)
             Y.append(y)
-            pepstrings.append(l["Peptide"][2:-2])
+            pepstrings.append(el_strings)
             sids.append(sid)
             numRows += 1
         else:
@@ -369,12 +371,12 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                     featScore = X[targets[sid]][scoreIndex]
                     if el[scoreIndex] > featScore:
                         X[targets[sid]] = el
-                        pepstrings[targets[sid]] = l["Peptide"][2:-2]
+                        pepstrings[targets[sid]] = el_strings
                 else:
                     targets[sid] = numRows
                     X.append(el)
                     Y.append(1)
-                    pepstrings.append(l["Peptide"][2:-2])
+                    pepstrings.append(el_strings)
                     sids.append(sid)
                     numRows += 1
             elif y == -1:
@@ -382,12 +384,12 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                     featScore = X[decoys[sid]][scoreIndex]
                     if el[scoreIndex] > featScore:
                         X[decoys[sid]] = el
-                        pepstrings[decoys[sid]] = l["Peptide"][2:-2]
+                        pepstrings[decoys[sid]] = el_strings
                 else:
                     decoys[sid] = numRows
                     X.append(el)
                     Y.append(-1)
-                    pepstrings.append(l["Peptide"][2:-2])
+                    pepstrings.append(el_strings)
                     sids.append(sid)
                     numRows += 1
 
@@ -410,14 +412,16 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
         min_max_scaler = preprocessing.MinMaxScaler()
         return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
 
-def writeOutput(output, scores, Y, pepstrings,sids):
+def writeIdent(output, scores, Y, pepstrings,sids):
+    """ Header is: (1) Kind (2) Sid (3) Peptide (4) Score
+    """
     n = len(Y)
     fid = open(output, 'w')
     fid.write("Kind\tSid\tPeptide\tScore\n")
     counter = 0
     for i in range(n):
         sid = sids[i]
-        p = pepstrings[i]
+        p = pepstrings[i][1][2:-2]
         score = scores[i]
         if Y[i] == 1:
             fid.write("t\t%d\t%s\t%f\n"
@@ -427,6 +431,26 @@ def writeOutput(output, scores, Y, pepstrings,sids):
             fid.write("d\t%d\t%s\t%f\n"
                       % (sid,p,score))
             counter += 1
+    fid.close()
+    print "Wrote %d PSMs" % counter
+
+def writeOutput(output, scores, Y, pepstrings,qvals):
+    """ Header is: (1)PSMId (2)score (3)q-value (4)peptide (5)Label (6)proteinIds
+    """
+    n = len(Y)
+    fid = open(output, 'w')
+    fid.write("PSMId\tscore\tq-value\tpeptide\tLabel\tproteinIds\n")
+    counter = 0
+    for i in range(n): # preferable to using zip
+        psm_id = pepstrings[i][0]
+        p = pepstrings[i][1]
+        prot_id = pepstrings[i][2]
+        score = scores[i]
+        q = qvals[i]
+        l = Y[i]
+        fid.write("%s\t%f\t%f\t%s\t%d\t%s\n"
+                  % (psm_id, score, q, p, l, prot_id))
+        counter += 1
     fid.close()
     print "Wrote %d PSMs" % counter
 
@@ -671,8 +695,8 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(validateFeatures)
             else:
-                # clf = getPercWeights(currIter, kFold)
-                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                clf = getPercWeights(currIter, kFold)
+                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
@@ -820,9 +844,12 @@ def funcIter(options, output):
     if _mergescore:
         scores = doMergeScores(q, testKeys, testScores, Y)
 
-    taq, _, _ = calcQ(scores, Y, q, False)
+    taq, _, qs = calcQ(scores, Y, q, False)
     print "Could identify %d targets" % (len(taq))
-    writeOutput(output, scores, Y, pepstrings, sids0)
+    if not _identOutput:
+        writeOutput(output, scores, Y, pepstrings, qs)
+    else:
+        writeOutput(output, scores, Y, pepstrings, sids0)
 
 if __name__ == '__main__':
     parser = optparse.OptionParser()
