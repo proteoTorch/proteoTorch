@@ -606,7 +606,7 @@ def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
 
 #########################################################
 #########################################################
-################### Training algorithms
+################### Learning algorithms
 #########################################################
 #########################################################
 def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels):
@@ -677,7 +677,54 @@ def getPercWeights(currIter, kFold):
     else:
         raise ValueError("%d iteration weights called for, only four iterations of weights available, exitting." % (currIter))
     return clf
-    
+
+def getPercKimWeights(currIter, kFold):
+    """ Weights to debug overall pipeline
+        Percolator optimal CV weights for http://jthalloran.ucdavis.edu/kimDataset.pin.gz
+    """
+    if currIter == 0:
+        if kFold == 0:
+            # Found 933182 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001.
+            clf = np.array([0, 1.4355, 0.407106, -0.182639, -0.0029198, -0.025436, -0.0211001, 0.0393384, 0.0576993, 0.382542, 0.36422, -0.156119, 0.185237, 0.00459663, -0.15619, -2.55448])
+        elif kFold == 1:
+            # Found 930574 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001. 
+            clf = np.array([0, 1.42124, 0.400207, -0.179377, -0.00695265, -0.0218471, -0.0212839, 0.0345309, 0.0594041, 0.380736, 0.363961, -0.153068, 0.185239, 0.0209587, -0.162228, -2.53709])
+        else:
+            # Found 931413 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001.
+            clf = np.array([0, 1.42639, 0.408076, -0.167477, -0.00511073, -0.0190763, -0.0208017, 0.0358508, 0.0467852, 0.381046, 0.371524, -0.154183, 0.181312, 0.0070681, -0.170513, -2.54931])
+    elif currIter == 1:
+        if kFold==0:
+            # Found 976776 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001.
+            clf = np.array([0, 1.40404, 0.684771, -0.381992, -0.0030135, -0.0585104, -0.0255245, 0.0707433, 0.105767, 0.648636, 0.611938, -0.28366, 0.300422, 0.00270719, -0.346918, -2.63462])
+        elif kFold == 1:
+            # Found 974401 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001.
+            clf = np.array([0, 1.38993, 0.672239, -0.375274, -0.00544713, -0.0525887, -0.0257287, 0.0624373, 0.106192, 0.645127, 0.61033, -0.276387, 0.297176, 0.0226007, -0.351021, -2.61737])
+        else:
+            # Found 974512 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001.
+            clf = np.array([0, 1.40291, 0.68634, -0.360334, -0.00360264, -0.0516156, -0.0257881, 0.06897, 0.0906783, 0.648646, 0.619584, -0.282209, 0.292906, 0.0105015, -0.368127, -2.64271])
+    elif currIter == 2:
+        if kFold == 0:
+            # Found 988020 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001.
+            clf = np.array([0, 1.23084, 0.799224, -0.452662, -0.000155801, -0.0696761, -0.0234961, 0.0774495, 0.117894, 0.715353, 0.670852, -0.323799, 0.299354, -0.00959294, -0.415832, -2.58927])
+        elif kFold == 1:
+            # Found 985496 training set PSMs with q<0.01 for hyperparameters Cpos=10, Cneg=100.001.
+            clf = np.array([0, 1.21897, 0.786889, -0.445367, -0.000916953, -0.0640835, -0.0234464, 0.0697376, 0.116407, 0.711566, 0.66775, -0.3169, 0.293524, 0.00648674, -0.419575, -2.57393])
+        else:
+            # Found 985470 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=1.00001.
+            clf = np.array([0, 1.22937, 0.801315, -0.431102, 0.000879794, -0.0641938, -0.0238616, 0.0775478, 0.1026, 0.7166, 0.675709, -0.323875, 0.290847, -0.00206429, -0.438003, -2.59866])
+    elif currIter == 3:
+        if kFold == 0:
+            # Found 991720 training set PSMs with q<0.01 for hyperparameters Cpos=1, Cneg=3.00004.
+            clf = np.array([0, 1.34536, 1.02, -0.551319, 0.00647906, -0.081274, -0.0303035, 0.0916025, 0.138379, 0.874836, 0.813276, -0.398534, 0.31878, -0.0242629, -0.535363, -2.66219])
+        elif kFold == 1:
+            # Found 989249 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=0.300004.
+            clf = np.array([0, 1.33114, 1.00764, -0.54218, 0.00588772, -0.0750878, -0.0306167, 0.083969, 0.135917, 0.870543, 0.80922, -0.392101, 0.311066, -0.00908895, -0.538028, -2.64617])
+        else:
+            # Found 988958 training set PSMs with q<0.01 for hyperparameters Cpos=0.1, Cneg=0.300004.
+            clf = np.array([0, 1.34116, 1.02427, -0.528916, 0.00756507, -0.076001, -0.0304979, 0.0929218, 0.121003, 0.87653, 0.818948, -0.39873, 0.308662, -0.0154511, -0.557602, -2.67202])
+    else:
+        raise ValueError("%d iteration weights called for, only four iterations of weights available, exitting." % (currIter))
+    return clf
 
 def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateLabels, 
                     cposes, cfracs, alpha, tron = True, currIter=1):
@@ -695,8 +742,9 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(validateFeatures)
             else:
-                clf = getPercWeights(currIter, kFold)
-                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                # clf = getPercWeights(currIter, kFold)
+                # clf = getPercKimWeights(currIter, kFold)
+                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
             currentTaq = len(tp)
