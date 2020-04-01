@@ -259,7 +259,7 @@ def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = Fal
 ################### I/O functions
 #########################################################
 #########################################################
-def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
+def subsample_pin(filename, outputFile, sampleRatio = 0.1):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
         the spectrum identification number
 
@@ -270,7 +270,68 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     with open(filename, 'r') as f:
         r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
         headerInOrder = r.fieldnames
-        reader = [l for l in r]
+        l = headerInOrder
+        if "ScanNr" not in l:
+            raise ValueError("No ScanNr field, exitting")
+        if "Charge1" not in l:
+            raise ValueError("No Charge1 field, exitting")
+
+        totalPsms = 0
+        totalTargets = 0
+        targetInds = []
+        decoyInds = []
+        for i, row in enumerate(r):
+            totalPsms += 1
+            if row["Label"] == "1":
+                totalTargets += 1
+                targetInds.append(i+1)
+            elif row["Label"] == "-1":
+                decoyInds.append(i+1)
+
+        subTotal = int(totalPsms * sampleRatio)
+        print len(decoyInds), len(targetInds)
+        print "%d total PSMs, %d targets, %d decoys" % (totalPsms, totalTargets, totalPsms - totalTargets)
+        print "Subsampling %d PSMs" % (subTotal)
+        numTargets = subTotal / 2
+        numDecoys = subTotal - numTargets
+        if numDecoys > len(decoyInds):
+            m = numDecoys - len(decoyInds)
+            numDecoys -= m
+            numTargets += m
+        else:
+            if numTargets > len(targetInds):
+                m = numTargets - len(targetInds)
+                numTargets -= m
+                numDecoys += m
+        print len(decoyInds), len(targetInds), numTargets, numDecoys
+        # Randomly sample target and decoy indices
+        sampleInds = set(random.sample(targetInds, numTargets))
+        # decoyInds = set(random.sample(decoyInds, numDecoys))
+        sampleInds |= set(random.sample(decoyInds, numDecoys))
+        sampleInds.add(0) # add header line
+
+        f.seek(0)
+        g = open(outputFile, 'w')
+        for i,l in enumerate(f):
+            if i in sampleInds:
+                g.write(l)
+        g.close()
+
+def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
+    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
+        the spectrum identification number
+
+        Normal tide features
+        SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
+    """
+
+    f = open(filename, 'r')
+    r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
+    headerInOrder = r.fieldnames
+    # with open(filename, 'r') as f:
+    #     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
+    #     headerInOrder = r.fieldnames
+        # reader = [l for l in r]
     l = headerInOrder
     if "ScanNr" not in l:
         raise ValueError("No ScanNr field, exitting")
@@ -284,19 +345,11 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     maxCharge = 1
     chargeKeys = [] # used as a fast hash check when determining charge integer
     # look at score key and charge keys
-    scoreKey = ''
     for i in l:
         m = i.lower()
-        if m == 'score':
-            scoreKey = i
         if m[:-1]=='charge':
             chargeKeys.append(i)
             maxCharge = max(maxCharge, int(m[-1]))
-
-    if not scoreKey:
-        for i in l:
-            if i.lower() == 'xcorr':
-                scoreKey = i            
 
     constKeys = ["SpecId", "Label", sidKey, "Peptide", "Proteins", "CalcMass", "ExpMass"]
     if not oneHotChargeVector:
@@ -324,7 +377,8 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
     scoreIndex = _scoreInd # column index of the ranking score used by the search algorithm 
     numRows = 0
     
-    for i, l in enumerate(reader):
+    # for i, l in enumerate(reader):
+    for i, l in enumerate(r):
         try:
             sid = int(l[sidKey])
         except ValueError:
@@ -392,19 +446,7 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
                     pepstrings.append(el_strings)
                     sids.append(sid)
                     numRows += 1
-
-    # # Standard-normalize the feature matrix
-    # m= np.mean(X, axis=0)
-    # s= np.std(X, axis=0)
-    # for i,sd in enumerate(s):
-    #     if sd <= 0.:
-    #         s[i] = 1.
-    # if _debug and _verb >= 2:
-    #     print "Feature\tmean\tstd"
-    #     for i,j,k in zip(featureNames, m, s):
-    #         print "%s\t%.2e\t%.2e" % (i,j,k)
-    # X = (np.array(X) - m) / s
-    # return pepstrings, X, np.array(Y), featureNames, sids
+    f.close()
 
     if _standardNorm:
         return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
@@ -908,7 +950,7 @@ if __name__ == '__main__':
     parser.add_option('--method', type = 'int', action= 'store', default = 2)
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 10)
     parser.add_option('--pin', type = 'string', action= 'store')
-    parser.add_option('--filebase', type = 'string', action= 'store')
+    parser.add_option('--outputfile', type = 'string', action= 'store')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
 
     (options, args) = parser.parse_args()
@@ -920,5 +962,4 @@ if __name__ == '__main__':
     #     random.seed(options.seed)
     _seed=options.seed
     _verb=options.verb
-    discOutput = '%s.txt' % (options.filebase)
-    funcIter(options, discOutput)
+    funcIter(options, options.outputfile)
