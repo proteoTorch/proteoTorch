@@ -658,7 +658,8 @@ def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateL
     clf.fit(features, labels)
     validation_scores = clf.decision_function(validateFeatures)
     tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True)
-    print "CV finished for fold %d: %d targets identified" % (kFold, len(tp))
+    if _debug and _verb > 1:
+        print "CV finished for fold %d: %d targets identified" % (kFold, len(tp))
     return validation_scores, len(tp), clf
 
 def getPercWeights(currIter, kFold):
@@ -800,7 +801,8 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 bestClf = deepcopy(clf)
     tp, _, _ = calcQ(topScores, validateLabels, thresh)
     bestTaq = len(tp)
-    print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
+    if _debug and _verb > 1:
+        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
     return topScores, bestTaq, bestClf
 
 #########################################################

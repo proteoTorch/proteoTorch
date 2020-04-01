@@ -70,7 +70,6 @@ class data(Structure):
                         idx += 1
 
 		# set labels
-                print "cp=%f, cn=%f" % (cp, cn)
 		for i,v in enumerate(y):
 			self.Y[i] = v
                         if v == 1:
@@ -79,8 +78,6 @@ class data(Structure):
                                 self.C[i] = cn
                         else:
                                 self.C[i] = 1.0
-                print "Wrote %d y values" % (i)
-
 	def __init__(self):
 		self.__createfrom__ = 'python'
 		self.__frombuffer__ = True
