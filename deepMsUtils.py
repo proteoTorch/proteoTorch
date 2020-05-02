@@ -26,7 +26,7 @@ import numpy
 
 from deepMs import calcQAndNumIdentified, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
 
-def load_percolator_output(filename, maxPerSid = False):
+def load_percolator_output(filename,  scoreKey = "score", maxPerSid = False):
     """ filename - percolator tab delimited output file
     header:
     (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
@@ -35,12 +35,12 @@ def load_percolator_output(filename, maxPerSid = False):
     """
     if not maxPerSid:
         with open(filename, 'r') as f:
-            return [float(l["score"]) for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
+            return [float(l[scoreKey]) for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
 
     f = open(filename)
     reader = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
 
-    scoref = lambda r: float(r["score"])
+    scoref = lambda r: float(r[scoreKey])
     # add all psms
     psms = {}
     for psmid, rows in itertools.groupby(reader, lambda r: r["PSMId"]):
@@ -58,11 +58,11 @@ def load_percolator_output(filename, maxPerSid = False):
     # take max over psms
     for sid in psms:
         top_psm = max(psms[sid], key = scoref)
-        max_scores.append(float(top_psm["score"]))
+        max_scores.append(float(top_psm[scoreKey]))
 
     return max_scores
 
-def load_percolator_target_decoy_files(filenames, maxPerSid = False):
+def load_percolator_target_decoy_files(filenames,  scoreKey = "score", maxPerSid = False):
     """ filenames - list of percolator tab delimited target and decoy files
     header:
     (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
@@ -70,8 +70,8 @@ def load_percolator_target_decoy_files(filenames, maxPerSid = False):
     List of scores
     """
     # Load targets
-    targets = load_percolator_output(filenames[0], maxPerSid)
-    decoys = load_percolator_output(filenames[1], maxPerSid)
+    targets = load_percolator_output(filenames[0], scoreKey, maxPerSid)
+    decoys = load_percolator_output(filenames[1], scoreKey, maxPerSid)
     scores = targets + decoys
     labels = [1]*len(targets) + [-1]*len(decoys)
     return scores, labels
@@ -118,27 +118,28 @@ def refine(scorelists, tdc = True):
     return newscorelists
 
 def parse_arg(argument):
-    """Parse positional arguments of the form 'desc:filename'
+    """Parse positional arguments of the form 'desc:scoreKey:filename'
     """
     result = argument.split(':')
-    if not result or len(result) < 2:
+    if not result or len(result) < 3:
         print >> sys.stderr, 'Argument %s not correctly specified.' % argument
         exit(-2)
     else:
         label = result[0]
+        scoreKey = result[1]
         fns = []
-        fn = os.path.expanduser(result[1])
+        fn = os.path.expanduser(result[2])
         if not os.path.exists(fn):
             print >> sys.stderr, '%s does not exist.' % fn
             exit(-3)
         fns.append(fn)
-        if len(result) == 3:
-            fn = os.path.expanduser(result[2])
+        if len(result) == 4:
+            fn = os.path.expanduser(result[3])
             if not os.path.exists(fn):
                 print >> sys.stderr, '%s does not exist.' % fn
                 exit(-3)
             fns.append(fn)
-        return (label, fns)
+        return (label, scoreKey, fns)
 
 def load_pin_scores(filename, scoreKey = "score", labelKey = "Label"):
     scores = []
@@ -155,13 +156,13 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label"):
     print "Read %d scores" % (lineNum-1)
     return scores, labels
 
-def load_test_scores(filenames, qTol = 0.01, qCurveCheck = 0.001):
+def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001):
     """ Load all PSMs and features ident file
     """
     if len(filenames)==1:
-        scores, labels = load_pin_scores(filenames[0])
+        scores, labels = load_pin_scores(filenames[0], scoreKey)
     elif len(filenames)==2: # Assume these are Percolator results, where target is specified followed by decoy
-        scores, labels = load_percolator_target_decoy_files(filenames)
+        scores, labels = load_percolator_target_decoy_files(filenames, scoreKey)
     else:
         raise ValueError('Number of filenames supplied for a single method was > 2, exitting.\n')
 
@@ -237,9 +238,9 @@ if __name__ == '__main__':
     scorelists = [ ]
 
     def process(arg, silent = False):
-        desc, fn = parse_arg(arg)
+        desc, scoreKey, fn = parse_arg(arg)
         methods.append(desc)
-        qs, ps, auc = load_test_scores(fn)
+        qs, ps, auc = load_test_scores(fn, scoreKey)
         scorelists.append( (qs, ps) )
         print '%s: %d identifications, AUC = %f' % (
                 desc, len(qs), auc)

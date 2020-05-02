@@ -259,10 +259,9 @@ def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = Fal
 ################### I/O functions
 #########################################################
 #########################################################
-def subsample_pin(filename, outputFile, sampleRatio = 0.1):
+def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
         the spectrum identification number
-
         Normal tide features
         SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
     """
@@ -273,8 +272,8 @@ def subsample_pin(filename, outputFile, sampleRatio = 0.1):
         l = headerInOrder
         if "ScanNr" not in l:
             raise ValueError("No ScanNr field, exitting")
-        if "Charge1" not in l:
-            raise ValueError("No Charge1 field, exitting")
+        # if "Charge1" not in l:
+        #     raise ValueError("No Charge1 field, exitting")
 
         totalPsms = 0
         totalTargets = 0
@@ -312,50 +311,74 @@ def subsample_pin(filename, outputFile, sampleRatio = 0.1):
 
         f.seek(0)
         g = open(outputFile, 'w')
+        g2 = []
+        if outputFile2:
+            g2 = open(outputFile2, 'w')
         for i,l in enumerate(f):
             if i in sampleInds:
                 g.write(l)
+            else:
+                if outputFile2:
+                    g2.write(l)
+            if i==0:
+                if outputFile2:
+                    g2.write(l)
         g.close()
+        if outputFile2:
+            g2.close()
 
-def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
-    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
-        the spectrum identification number
-
-        Normal tide features
-        SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
+def load_pin_return_featureMatrix(filename):
+    """ Load all PSMs and features from a percolator input (PIN) file
+        
+        For n input features and m total file fields, the file format is:
+        header field 1: SpecId, or other PSM id
+        header field 2: Label, denoting whether the PSM is a target or decoy
+        header field 3: ScanNr, the scan number.  Note this string must be exactly stated
+        header field 4 (optional): ExpMass, PSM experimental mass.  Not used as a feature
+        header field 4 + 1 : Input feature 1
+        header field 4 + 2 : Input feature 2
+        ...
+        header field 4 + n : Input feature n
+        header field 4 + n + 1 : Peptide, the peptide string
+        header field 4 + n + 2 : Protein id 1
+        header field 4 + n + 3 : Protein id 2
+        ...
+        header field m : Protein id m - n - 4
     """
 
     f = open(filename, 'r')
     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
     headerInOrder = r.fieldnames
-    # with open(filename, 'r') as f:
-    #     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
-    #     headerInOrder = r.fieldnames
-        # reader = [l for l in r]
     l = headerInOrder
+
+    sids = [] # keep track of spectrum IDs
+    # Check that header fields follow pin schema
+    # spectrum identification key for PIN files
+    # Note: this string must be stated exactly as the third header field
+    sidKey = "ScanNr"
     if "ScanNr" not in l:
         raise ValueError("No ScanNr field, exitting")
-    if "Charge1" not in l:
-        raise ValueError("No Charge1 field, exitting")
 
-    sids = []
-    # spectrum identification key for PIN files
-    sidKey = "ScanNr" # note that this typically denotes retention time
+    constKeys = [l[0]]
+    # Check label
+    m = l[1]
+    if m.lower() == 'label':
+        constKeys.append(l[1])
+    # Exclude calcmass and expmass as features
+    constKeys += [sidKey, "CalcMass", "ExpMass"]
 
-    maxCharge = 1
-    chargeKeys = [] # used as a fast hash check when determining charge integer
-    # look at score key and charge keys
-    for i in l:
-        m = i.lower()
-        if m[:-1]=='charge':
-            chargeKeys.append(i)
-            maxCharge = max(maxCharge, int(m[-1]))
-
-    constKeys = ["SpecId", "Label", sidKey, "Peptide", "Proteins", "CalcMass", "ExpMass"]
-    if not oneHotChargeVector:
-        constKeys = set(constKeys + chargeKeys) # exclude these when reserializing data
-    else:
-        constKeys = set(constKeys) # exclude these when reserializing data
+    # Find peptide and protein ID fields
+    psmStrings = [l[0]]
+    isConstKey = False
+    for key in headerInOrder:
+        m = key.lower()
+        if m=="peptide":
+            isConstKey = True
+        if isConstKey:
+            constKeys.append(key)
+            psmStrings.append(key)
+            
+    constKeys = set(constKeys) # exclude these when reserializing data
 
     keys = []
     for h in headerInOrder: # keep order of keys intact
@@ -363,8 +386,6 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
             keys.append(h)
     
     featureNames = []
-    if not oneHotChargeVector:
-        featureNames.append("Charge")
     for k in keys:
         featureNames.append(k)
             
@@ -384,20 +405,6 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
         except ValueError:
             print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
 
-        charge = 0
-        # look for current PSM, encoded as a one-hot vector
-        for c in chargeKeys:
-            try:
-                charge = int(l[c])
-            except ValueError:
-                print "Could not convert charge %s on line %d to int, exitting" % (l[c], i+1)
-
-            if charge:
-                charge = int(c[-1])
-                break
-
-        assert charge > 0, "No charge denoted with value 1 or greater for PSM on line %d, exitting" % (i+1)
-
         try:
             y = int(l["Label"])
         except ValueError:
@@ -407,12 +414,14 @@ def load_pin_return_featureMatrix(filename, oneHotChargeVector = True):
             exit(-1)
 
         el = []
-        if not oneHotChargeVector:
-            el.append(charge)
         for k in keys:
-            el.append(float(l[k]))
+            try:
+                el.append(float(l[k]))
+            except ValueError:
+                print "Could not convert feature %s with value %s to float, exitting" % (k, l[k])
 
-        el_strings = (l["SpecId"], l["Peptide"], l["Proteins"])
+        # el_strings = (l["SpecId"], l["Peptide"], l["Proteins"])
+        el_strings = [l[k] for k in psmStrings]
         if not _topPsm:
             X.append(el)
             Y.append(y)
@@ -890,8 +899,7 @@ def funcIter(options, output):
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
-    oneHotChargeVector = True
-    pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(f, oneHotChargeVector)
+    pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(f)
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
     n = l[0] # number of instances
