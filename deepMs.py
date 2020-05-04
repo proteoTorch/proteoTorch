@@ -33,8 +33,10 @@ import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from sklearn import mixture
 from svmlin import svmlin
-# import pyximport; pyximport.install()
-import qvalues
+try:
+    from qvalues import * # load cython library
+except:
+    from pyfiles.qvalsBase import * # import unoptimized q-value calculation
 
 #########################################################
 #########################################################
@@ -62,198 +64,17 @@ _indInd=2 # Used to keep track of feature matrix rows when sorting based on scor
 ################### CV-bin score normalization
 #########################################################
 #########################################################
-# def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
-#     """ Returns the minimal score which achieves the specified threshold and the
-#         median decoy score from the set
-#     """
-#     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-#     scoreInd = _scoreInd
-#     labelInd = _labelInd
-#     # allScores: list of triples consisting of score, label, and index
-#     allScores = zip(scores,labels, range(len(scores)))
-#     #--- sort descending
-#     allScores.sort(reverse=True)
-#     pi0 = 1.
-#     qvals = qvalues.getQValues(pi0, allScores, skipDecoysPlusOne)
-
-#     # Calculate minimum score which achieves q-value thresh
-#     u = allScores[0][scoreInd]
-#     for idx, q in enumerate(qvals):
-#         if q > thresh:
-#             break
-#         u = allScores[idx][scoreInd]
-
-#     # find median decoy score
-#     d = allScores[0][scoreInd] + 1.
-#     dScores = sorted([score for score,l in zip(scores,labels) if l != 1])
-#     if len(dScores):
-#         d = dScores[max(0,len(dScores) / 2)]
-#     return u, d
-
 def doMergeScores(thresh, testSets, scores, Y):
     # record new scores as we go
     newScores = np.zeros(scores.shape)
     for testSids in testSets:
-        u, d = qvalues.qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
         diff = u - d
         if diff <= 0.:
             diff = 1.
         for ts in testSids:
             newScores[ts] = (scores[ts] - u) / (u-d)
     return newScores
-
-# #########################################################
-# #########################################################
-# ################### Q-value estimation functions
-# #########################################################
-# #########################################################
-# # From itertools, https://docs.python.org/3/library/itertools.html#itertools.accumulate
-# def accumulate(iterable, func=operator.add, initial=None):
-#     'Return running totals'
-#     # accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-#     # accumulate([1,2,3,4,5], initial=100) --> 100 101 103 106 110 115
-#     # accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
-#     it = iter(iterable)
-#     total = initial
-#     if initial is None:
-#         try:
-#             total = next(it)
-#         except StopIteration:
-#             return
-#     yield total
-#     for element in it:
-#         total = func(total, element)
-#         yield total
-
-# ###### TODO: add calculation of pi0 for q-value re-estimation after PSM rescoring
-# # def findpi0():
-
-# ## This is a reimplementation of Uri Keich's code written in R.
-# #
-# # Assumes that scores are sorted in descending order
-# #
-# # If pi0 == 1.0 this is equal to the "traditional" q-value calculation
-# ##
-# # Assumes that scores are sorted in descending order
-# def getMixMaxCounts(combined, h_w_le_z, h_z_le_z):
-#     """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
-#     """
-#     cnt_z = 0
-#     cnt_w = 0
-#     queue = 0
-#     for idx in range(len(combined)-1, -1, -1):
-#         if(combiined[idx][1]==1):
-#             cnt_w += 1
-#         else:
-#             cnt_z += 1
-#             queue += 1
-#         if idx == 0 or combined[idx][0] != combined[idx-1][0]:
-#             for i in range(queue):
-#                 h_w_le_z.append(float(cnt_w))
-#                 h_z_le_z.append(float(cnt_z))
-#             queue = 0
-
-# def getQValues(pi0, combined, skipDecoysPlusOne = False):
-#     """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
-#     """
-#     qvals = []
-#     scoreInd = _scoreInd
-#     labelInd = _labelInd
-
-#     h_w_le_z = [] # N_{w<=z} and N_{z<=z}
-#     h_z_le_z = []
-#     if pi0 < 1.0:
-#         getMixMaxCounts(combined, h_w_le_z, h_z_le_z)
-#     estPx_lt_zj = 0.
-#     E_f1_mod_run_tot = 0.0
-#     fdr = 0.0
-#     n_z_ge_w = 1
-#     n_w_ge_w = 0 # N_{z>=w} and N_{w>=w}
-#     if skipDecoysPlusOne:
-#         n_z_ge_w = 0
-
-#     decoyQueue = 0 # handles ties
-#     targetQueue = 0
-#     for idx in range(len(combined)):
-#         if combined[idx][labelInd] == 1:
-#             n_w_ge_w += 1
-#             targetQueue += 1
-#         else:
-#             n_z_ge_w += 1
-#             decoyQueue += 1
-
-#         if idx==len(combined)-1 or combined[idx][scoreInd] != combined[idx+1][scoreInd]:
-#             if pi0 < 1.0 and decoyQueue > 0:
-#                 j = len(h_w_le_z) - (n_z_ge_w - 1)
-#                 cnt_w = float(h_w_le_z[j])
-#                 cnt_z = float(h_z_le_z[j])
-#                 estPx_lt_zj = (cnt_w - pi0*cnt_z) / ((1.0 - pi0)*cnt_z)
-
-#                 if estPx_lt_zj > 1.:
-#                     estPx_lt_zj = 1.
-#                 if estPx_lt_zj < 0.:
-#                     estPx_lt_zj = 0.
-#                 E_f1_mod_run_tot += float(decoyQueue) * estPx_lt_zj * (1.0 - pi0)
-#                 if _debug and _verb >= 3:
-#                     print "Mix-max num negatives correction: %f vs. %f" % ((1.0 - pi0)*float(n_z_ge_w), E_f1_mod_run_tot)
-
-#             if _includeNegativesInResult:
-#                 targetQueue += decoyQueue
-
-#             fdr = (n_z_ge_w * pi0 + E_f1_mod_run_tot) / float(max(1, n_w_ge_w))
-#             for i in range(targetQueue):
-#                 qvals.append(min(fdr,1.))
-#             decoyQueue = 0
-#             targetQueue = 0
-#     # Convert the FDRs into q-values.
-#     # Below is equivalent to: partial_sum(qvals.rbegin(), qvals.rend(), qvals.rbegin(), min);
-#     return list(accumulate(qvals[::-1], min))[::-1]
-    
-# def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
-#     """Returns q-values and the indices of the positive class such that q <= thresh
-#     """
-#     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-#     # allScores: list of triples consisting of score, label, and index
-#     allScores = zip(scores,labels, range(len(scores)))
-#     #--- sort descending
-#     allScores.sort(reverse=True)
-#     pi0 = 1.
-#     qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
-    
-#     taq = []
-#     daq = []
-#     for idx, q in enumerate(qvals):
-#         if q > thresh:
-#             break
-#         else:
-#             curr_label = allScores[idx][1]
-#             curr_og_idx = allScores[idx][2]
-#             if curr_label == 1:
-#                 taq.append(curr_og_idx)
-#             else:
-#                 daq.append(curr_og_idx)
-#     return taq,daq, [qvals[i] for _,_,i in allScores]
-
-# def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
-#     """Returns q-values and the number of identified spectra at each q-value
-#     """
-#     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-#     # allScores: list of triples consisting of score, label, and index
-#     allScores = zip(scores,labels, range(len(scores)))
-#     #--- sort descending
-#     allScores.sort(reverse=True)
-#     pi0 = 1.
-#     qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
-    
-#     posTot = 0
-#     ps = []
-#     for idx, q in enumerate(qvals):
-#         curr_label = allScores[idx][1]
-#         curr_og_idx = allScores[idx][2]
-#         if curr_label == 1:
-#             posTot += 1
-#         ps.append(posTot)
-#     return qvals, ps
 
 #########################################################
 #########################################################
@@ -524,9 +345,9 @@ def findInitDirection(X, Y, thresh, featureNames):
         # Check scores multiplied by both 1 and positive -1
         for checkNegBest in range(2):
             if checkNegBest==1:
-                taq, _, _ = qvalues.calcQ(-1. * scores, Y, thresh, True, _verb)
+                taq, _, _ = calcQ(-1. * scores, Y, thresh, True, _verb)
             else:
-                taq, _, _ = qvalues.calcQ(scores, Y, thresh, True, _verb)
+                taq, _, _ = calcQ(scores, Y, thresh, True, _verb)
             if len(taq) > numIdentified:
                 initDirection = i
                 numIdentified = len(taq)
@@ -553,9 +374,9 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
         # Check scores multiplied by both 1 and positive -1
         for checkNegBest in range(2):
             if checkNegBest==1:
-                taq, _, _ = qvalues.calcQ(-1. * currScores, Y[trainSids], q, True, _verb)
+                taq, _, _ = calcQ(-1. * currScores, Y[trainSids], q, True, _verb)
             else:
-                taq, _, _ = qvalues.calcQ(currScores, Y[trainSids], q, True, _verb)
+                taq, _, _ = calcQ(currScores, Y[trainSids], q, True, _verb)
             if len(taq) > numIdentified:
                 numIdentified = len(taq)
                 negBest = checkNegBest==1
@@ -667,7 +488,7 @@ def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateL
     clf = lda()
     clf.fit(features, labels)
     validation_scores = clf.decision_function(validateFeatures)
-    tp, _, _ = qvalues.calcQ(validation_scores, validateLabels, thresh, True, _verb)
+    tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True, _verb)
     if _debug and _verb > 1:
         print "CV finished for fold %d: %d targets identified" % (kFold, len(tp))
     return validation_scores, len(tp), clf
@@ -799,7 +620,7 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 # clf = getPercKimWeights(currIter, kFold)
                 clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
-            tp, _, _ = qvalues.calcQ(validation_scores, validateLabels, thresh, True, _verb)
+            tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True, _verb)
             currentTaq = len(tp)
             if _debug and _verb > 2:
                 print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
@@ -809,7 +630,7 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 bestCp = cpos * alpha
                 bestCn = cneg * alpha
                 bestClf = deepcopy(clf)
-    tp, _, _ = qvalues.calcQ(topScores, validateLabels, thresh, _verb)
+    tp, _, _ = calcQ(topScores, validateLabels, thresh, _verb)
     bestTaq = len(tp)
     if _debug and _verb > 1:
         print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
@@ -833,7 +654,7 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
             testScores[testSids] = w.decision_function(X[testSids])
         
         # Calculate true positives
-        tp, _, _ = qvalues.calcQ(testScores[testSids], Y[testSids], thresh, False, _verb)
+        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False, _verb)
         totalTaq += len(tp)
         kFold += 1
     return testScores, totalTaq
@@ -868,7 +689,7 @@ def doIter(thresh, keys, scores, X, Y,
     for cvBinSids in keys:
         validateSids = cvBinSids
         # Find training set using q-value analysis
-        taq, daq, _ = qvalues.calcQ(scores[kFold], Y[cvBinSids], thresh, True, _verb)
+        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True, _verb)
         gd = getDecoyIdx(Y, cvBinSids)
         # Debugging check
         if _debug and _verb >= 1:
@@ -945,7 +766,7 @@ def funcIter(options, output):
     if _mergescore:
         scores = doMergeScores(q, testKeys, testScores, Y)
 
-    taq, _, qs = qvalues.calcQ(scores, Y, q, False, _verb)
+    taq, _, qs = calcQ(scores, Y, q, False, _verb)
     print "Could identify %d targets" % (len(taq))
     if not _identOutput:
         writeOutput(output, scores, Y, pepstrings, qs)

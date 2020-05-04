@@ -1,5 +1,11 @@
 # distutils: language=c++
 
+# Written by John Halloran <jthalloran@ucdavis.edu>
+#
+# Copyright (C) 2020 John Halloran
+# Licensed under the Open Software License version 3.0
+# See COPYING or http://opensource.org/licenses/OSL-3.0
+
 from libcpp.vector cimport vector
 from libc.stdlib cimport malloc, free
 import operator
@@ -68,8 +74,8 @@ def accumulate(iterable, func=operator.add, initial=None):
 # def findpi0():
 
 def getQValues(double pi0, combined, 
-    unsigned int numPsms,
-    skipDecoysPlusOne = False, int verb = -1):
+               unsigned int numPsms,
+               skipDecoysPlusOne = False, int verb = -1):
     """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
     """
     cdef vector[double] qvals
@@ -164,7 +170,7 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False,
     allScores.sort(reverse=True)
     pi0 = 1.
     qvals = getQValues(pi0, allScores, len(allScores),
-    skipDecoysPlusOne, verb)
+                       skipDecoysPlusOne, verb)
     
     taq = []
     daq = []
