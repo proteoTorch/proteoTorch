@@ -33,7 +33,7 @@ import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from sklearn import mixture
 from svmlin import svmlin
-import pyximport; pyximport.install()
+# import pyximport; pyximport.install()
 import qvalues
 
 #########################################################
