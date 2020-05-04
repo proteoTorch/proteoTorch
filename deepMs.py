@@ -62,39 +62,39 @@ _indInd=2 # Used to keep track of feature matrix rows when sorting based on scor
 ################### CV-bin score normalization
 #########################################################
 #########################################################
-def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
-    """ Returns the minimal score which achieves the specified threshold and the
-        median decoy score from the set
-    """
-    assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-    scoreInd = _scoreInd
-    labelInd = _labelInd
-    # allScores: list of triples consisting of score, label, and index
-    allScores = zip(scores,labels, range(len(scores)))
-    #--- sort descending
-    allScores.sort(reverse=True)
-    pi0 = 1.
-    qvals = qvalues.getQValues(pi0, allScores, skipDecoysPlusOne)
+# def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
+#     """ Returns the minimal score which achieves the specified threshold and the
+#         median decoy score from the set
+#     """
+#     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
+#     scoreInd = _scoreInd
+#     labelInd = _labelInd
+#     # allScores: list of triples consisting of score, label, and index
+#     allScores = zip(scores,labels, range(len(scores)))
+#     #--- sort descending
+#     allScores.sort(reverse=True)
+#     pi0 = 1.
+#     qvals = qvalues.getQValues(pi0, allScores, skipDecoysPlusOne)
 
-    # Calculate minimum score which achieves q-value thresh
-    u = allScores[0][scoreInd]
-    for idx, q in enumerate(qvals):
-        if q > thresh:
-            break
-        u = allScores[idx][scoreInd]
+#     # Calculate minimum score which achieves q-value thresh
+#     u = allScores[0][scoreInd]
+#     for idx, q in enumerate(qvals):
+#         if q > thresh:
+#             break
+#         u = allScores[idx][scoreInd]
 
-    # find median decoy score
-    d = allScores[0][scoreInd] + 1.
-    dScores = sorted([score for score,l in zip(scores,labels) if l != 1])
-    if len(dScores):
-        d = dScores[max(0,len(dScores) / 2)]
-    return u, d
+#     # find median decoy score
+#     d = allScores[0][scoreInd] + 1.
+#     dScores = sorted([score for score,l in zip(scores,labels) if l != 1])
+#     if len(dScores):
+#         d = dScores[max(0,len(dScores) / 2)]
+#     return u, d
 
 def doMergeScores(thresh, testSets, scores, Y):
     # record new scores as we go
     newScores = np.zeros(scores.shape)
     for testSids in testSets:
-        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+        u, d = qvalues.qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
         diff = u - d
         if diff <= 0.:
             diff = 1.

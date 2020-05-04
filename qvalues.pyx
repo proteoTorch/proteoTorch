@@ -1,12 +1,45 @@
 # distutils: language=c++
 
 from libcpp.vector cimport vector
-
+from libc.stdlib cimport malloc, free
 import operator
 
 _includeNegativesInResult=True
 _scoreInd=0
 _labelInd=1
+
+#########################################################
+#########################################################
+################### CV-bin score normalization
+#########################################################
+#########################################################
+def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
+    """ Returns the minimal score which achieves the specified threshold and the
+        median decoy score from the set
+    """
+    assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
+    scoreInd = _scoreInd
+    labelInd = _labelInd
+    # allScores: list of triples consisting of score, label, and index
+    allScores = zip(scores,labels, range(len(scores)))
+    #--- sort descending
+    allScores.sort(reverse=True)
+    pi0 = 1.
+    qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
+
+    # Calculate minimum score which achieves q-value thresh
+    u = allScores[0][scoreInd]
+    for idx, q in enumerate(qvals):
+        if q > thresh:
+            break
+        u = allScores[idx][scoreInd]
+
+    # find median decoy score
+    d = allScores[0][scoreInd] + 1.
+    dScores = sorted([score for score,l in zip(scores,labels) if l != 1])
+    if len(dScores):
+        d = dScores[max(0,len(dScores) / 2)]
+    return u, d
 
 #########################################################
 #########################################################
@@ -34,31 +67,6 @@ def accumulate(iterable, func=operator.add, initial=None):
 ###### TODO: add calculation of pi0 for q-value re-estimation after PSM rescoring
 # def findpi0():
 
-## This is a reimplementation of Uri Keich's code written in R.
-#
-# Assumes that scores are sorted in descending order
-#
-# If pi0 == 1.0 this is equal to the "traditional" q-value calculation
-##
-# Assumes that scores are sorted in descending order
-def getMixMaxCounts(combined, h_w_le_z, h_z_le_z):
-    """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
-    """
-    cnt_z = 0
-    cnt_w = 0
-    queue = 0
-    for idx in range(len(combined)-1, -1, -1):
-        if(combined[idx][1]==1):
-            cnt_w += 1
-        else:
-            cnt_z += 1
-            queue += 1
-        if idx == 0 or combined[idx][0] != combined[idx-1][0]:
-            for i in range(queue):
-                h_w_le_z.append(float(cnt_w))
-                h_z_le_z.append(float(cnt_z))
-            queue = 0
-
 def getQValues(double pi0, combined, 
     unsigned int numPsms,
     skipDecoysPlusOne = False, int verb = -1):
@@ -68,25 +76,26 @@ def getQValues(double pi0, combined,
     qvals.reserve(numPsms)
     cdef unsigned int scoreInd = _scoreInd
     cdef unsigned int labelInd = _labelInd
+    cdef double *cscores = <double *> malloc(numPsms * sizeof(double))
+    cdef int *clabels  = <int *> malloc(numPsms * sizeof(int))
+    for idx in range(numPsms):
+        cscores[idx] = combined[idx][scoreInd]
+        clabels[idx] = combined[idx][labelInd]
 
-    # h_w_le_z = [] # N_{w<=z} and N_{z<=z}
-    # h_z_le_z = []
     cdef vector[int] h_w_le_z # N_{w<=z} and N_{z<=z}
     cdef vector[int] h_z_le_z
     cdef unsigned int countTotal = 0
     cdef unsigned int n_z_ge_w = 0
     cdef unsigned int n_w_ge_w = 0
     cdef unsigned int queue = 0
-
     if pi0 < 1.0:
-        # getMixMaxCounts(combined, h_w_le_z, h_z_le_z)
-        for idx in range(len(combined)-1, -1, -1):
-            if(combined[idx][1]==1):
+        for idx in range(numPsms-1, -1, -1):
+            if(clabels[idx]==1):
                 n_w_ge_w += 1
             else:
                 n_z_ge_w += 1
                 queue += 1
-            if idx == 0 or combined[idx][0] != combined[idx-1][0]:
+            if idx == 0 or cscores[idx] != cscores[idx-1]:
                 for i in range(queue):
                     h_w_le_z.push_back(n_w_ge_w)
                     h_z_le_z.push_back(n_z_ge_w)
@@ -98,6 +107,7 @@ def getQValues(double pi0, combined,
     cdef double fdr = 0.0
     cdef double cnt_z = 0
     cdef double cnt_w = 0
+    cdef int j = 0
     n_z_ge_w = 1
     n_w_ge_w = 0 # N_{z>=w} and N_{w>=w}
     if skipDecoysPlusOne:
@@ -105,15 +115,15 @@ def getQValues(double pi0, combined,
 
     cdef unsigned int decoyQueue = 0 # handles ties
     cdef unsigned int targetQueue = 0
-    for idx in range(len(combined)):
-        if combined[idx][labelInd] == 1:
+    for idx in range(numPsms):
+        if clabels[idx] == 1:
             n_w_ge_w += 1
             targetQueue += 1
         else:
             n_z_ge_w += 1
             decoyQueue += 1
 
-        if idx==len(combined)-1 or combined[idx][scoreInd] != combined[idx+1][scoreInd]:
+        if idx==numPsms-1 or cscores[idx] != cscores[idx+1]:
             if pi0 < 1.0 and decoyQueue > 0:
                 j = countTotal - (n_z_ge_w - 1)
                 cnt_w = float(h_w_le_z[j])
@@ -136,6 +146,9 @@ def getQValues(double pi0, combined,
                 qvals.push_back(min(fdr,1.))
             decoyQueue = 0
             targetQueue = 0
+
+    free(cscores)
+    free(clabels)
     # Convert the FDRs into q-values.
     # Below is equivalent to: partial_sum(qvals.rbegin(), qvals.rend(), qvals.rbegin(), min);
     return list(accumulate(qvals[::-1], min))[::-1]
