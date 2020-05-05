@@ -7,12 +7,44 @@
 # See COPYING or http://opensource.org/licenses/OSL-3.0
 
 from libcpp.vector cimport vector
-from libc.stdlib cimport malloc, free
+from libc.stdlib cimport malloc, free, qsort
 import operator
 
 _includeNegativesInResult=True
 _scoreInd=0
 _labelInd=1
+
+
+cdef extern from "stdlib.h":
+    void qsort(void *base, int nmemb, int size,
+                int(*compar)(const void *, const void *)) nogil
+
+cdef struct psm:
+        double score
+        int label
+        unsigned int index
+
+# cdef int compare(const_void * a, const_void * b):
+#     # sort in reverse order
+#     cdef double v = ((a)).score - ((b)).score
+#     if v < 0:
+#         return 1
+#     elif v > 0:
+#         return -1
+#     else:
+#         return 0
+
+cdef int compare(const void * pa, const void * pb):
+    cdef double a, b 
+    a = (<psm *>pa)[0].score
+    b = (<psm *>pb)[0].score
+    # sort in reverse order
+    if a < b:
+        return 1
+    elif a > b:
+        return -1
+    else:
+        return 0
 
 #########################################################
 #########################################################
@@ -24,27 +56,42 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
         median decoy score from the set
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-    scoreInd = _scoreInd
-    labelInd = _labelInd
-    # allScores: list of triples consisting of score, label, and index
-    allScores = zip(scores,labels, range(len(scores)))
-    #--- sort descending
-    allScores.sort(reverse=True)
-    pi0 = 1.
-    qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
+    cdef int numPsms
+    numPsms = len(scores)
+    # # allScores: list of triples consisting of score, label, and index
+    # allScores = zip(scores,labels, range(len(scores)))
+    # #--- sort descending
+    # allScores.sort(reverse=True)
+    cdef psm *allScores  = <psm *> malloc(numPsms * sizeof(psm))
+    cdef unsigned int idx
+    for idx in range(numPsms):
+        allScores[idx].score = scores[idx]
+        allScores[idx].label = labels[idx]
+        allScores[idx].index = idx
+    # psmsort(allScores, numPsms)
+    qsort(allScores, numPsms, sizeof(psm), compare)
+    cdef double pi0 = 1.
+    cdef int sdpo = 0
+    if skipDecoysPlusOne:
+        sdpo = 1
+    qvals = getQValues(pi0, allScores, numPsms,
+                       sdpo)
 
     # Calculate minimum score which achieves q-value thresh
-    u = allScores[0][scoreInd]
-    for idx, q in enumerate(qvals):
+    u = allScores[0].score
+    for idx in range(numPsms):
+        q = qvals[idx]
+    # for idx, q in enumerate(qvals):
         if q > thresh:
             break
-        u = allScores[idx][scoreInd]
+        u = allScores[idx].score
 
     # find median decoy score
-    d = allScores[0][scoreInd] + 1.
+    d = allScores[0].score + 1.
     dScores = sorted([score for score,l in zip(scores,labels) if l != 1])
     if len(dScores):
         d = dScores[max(0,len(dScores) / 2)]
+    free(allScores)
     return u, d
 
 #########################################################
@@ -72,21 +119,14 @@ def accumulate(iterable, func=operator.add, initial=None):
 
 ###### TODO: add calculation of pi0 for q-value re-estimation after PSM rescoring
 # def findpi0():
-
-def getQValues(double pi0, combined, 
-               unsigned int numPsms,
-               skipDecoysPlusOne = False, int verb = -1):
+cdef getQValues(double pi0, psm* combined, 
+                unsigned int numPsms,
+                int skipDecoysPlusOne = 0, int verb = -1):
     """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
     """
     cdef vector[double] qvals
     qvals.reserve(numPsms)
-    cdef unsigned int scoreInd = _scoreInd
-    cdef unsigned int labelInd = _labelInd
-    cdef double *cscores = <double *> malloc(numPsms * sizeof(double))
-    cdef int *clabels  = <int *> malloc(numPsms * sizeof(int))
-    for idx in range(numPsms):
-        cscores[idx] = combined[idx][scoreInd]
-        clabels[idx] = combined[idx][labelInd]
+    cdef unsigned int idx
 
     cdef vector[int] h_w_le_z # N_{w<=z} and N_{z<=z}
     cdef vector[int] h_z_le_z
@@ -94,14 +134,15 @@ def getQValues(double pi0, combined,
     cdef unsigned int n_z_ge_w = 0
     cdef unsigned int n_w_ge_w = 0
     cdef unsigned int queue = 0
+
     if pi0 < 1.0:
         for idx in range(numPsms-1, -1, -1):
-            if(clabels[idx]==1):
+            if(combined[idx].label==1):
                 n_w_ge_w += 1
             else:
                 n_z_ge_w += 1
                 queue += 1
-            if idx == 0 or cscores[idx] != cscores[idx-1]:
+            if idx == 0 or combined[idx].scoe != combined[idx-1].score:
                 for i in range(queue):
                     h_w_le_z.push_back(n_w_ge_w)
                     h_z_le_z.push_back(n_z_ge_w)
@@ -122,14 +163,14 @@ def getQValues(double pi0, combined,
     cdef unsigned int decoyQueue = 0 # handles ties
     cdef unsigned int targetQueue = 0
     for idx in range(numPsms):
-        if clabels[idx] == 1:
+        if combined[idx].label == 1:
             n_w_ge_w += 1
             targetQueue += 1
         else:
             n_z_ge_w += 1
             decoyQueue += 1
 
-        if idx==numPsms-1 or cscores[idx] != cscores[idx+1]:
+        if idx==numPsms-1 or combined[idx].score != combined[idx+1].score:
             if pi0 < 1.0 and decoyQueue > 0:
                 j = countTotal - (n_z_ge_w - 1)
                 cnt_w = float(h_w_le_z[j])
@@ -153,56 +194,86 @@ def getQValues(double pi0, combined,
             decoyQueue = 0
             targetQueue = 0
 
-    free(cscores)
-    free(clabels)
     # Convert the FDRs into q-values.
     # Below is equivalent to: partial_sum(qvals.rbegin(), qvals.rend(), qvals.rbegin(), min);
     return list(accumulate(qvals[::-1], min))[::-1]
     
 def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False,
-    verb = -1):
+          verb = -1):
     """Returns q-values and the indices of the positive class such that q <= thresh
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-    # allScores: list of triples consisting of score, label, and index
-    allScores = zip(scores,labels, range(len(scores)))
-    #--- sort descending
-    allScores.sort(reverse=True)
-    pi0 = 1.
-    qvals = getQValues(pi0, allScores, len(allScores),
-                       skipDecoysPlusOne, verb)
+    cdef int numPsms
+    numPsms = len(scores)
+    # # allScores: list of triples consisting of score, label, and index
+    # allScores = zip(scores,labels, range(len(scores)))
+    # #--- sort descending
+    # allScores.sort(reverse=True)
+    # replace allScores 
+    cdef psm *allScores  = <psm *> malloc(numPsms * sizeof(psm))
+    cdef unsigned int idx
+    for idx in range(numPsms):
+        allScores[idx].score = scores[idx]
+        allScores[idx].label = labels[idx]
+        allScores[idx].index = idx
+    # psmsort(allScores, numPsms)
+    qsort(allScores, numPsms, sizeof(psm), compare)
+    cdef double pi0 = 1.
+    cdef int sdpo = 0
+    if skipDecoysPlusOne:
+        sdpo = 1
+    qvals = getQValues(pi0, allScores, numPsms,
+                       sdpo, verb)
     
     taq = []
     daq = []
-    for idx, q in enumerate(qvals):
+    for idx in range(numPsms):
+        q = qvals[idx]
         if q > thresh:
             break
         else:
-            curr_label = allScores[idx][1]
-            curr_og_idx = allScores[idx][2]
+            curr_label = allScores[idx].label
+            curr_og_idx = allScores[idx].index
             if curr_label == 1:
                 taq.append(curr_og_idx)
             else:
                 daq.append(curr_og_idx)
-    return taq,daq, [qvals[i] for _,_,i in allScores]
+    qvals = [qvals[allScores[idx].index] for i in range(numPsms)]
+    free(allScores)
+    return taq,daq, qvals
 
-def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
+def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = False, verb = -1):
     """Returns q-values and the number of identified spectra at each q-value
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
-    # allScores: list of triples consisting of score, label, and index
-    allScores = zip(scores,labels, range(len(scores)))
-    #--- sort descending
-    allScores.sort(reverse=True)
-    pi0 = 1.
-    qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
+    cdef int numPsms
+    numPsms = len(scores)
+    # # allScores: list of triples consisting of score, label, and index
+    # allScores = zip(scores,labels, range(len(scores)))
+    # #--- sort descending
+    # allScores.sort(reverse=True)
+    # pi0 = 1.
+    # qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
+    cdef psm *allScores  = <psm *> malloc(numPsms * sizeof(psm))
+    cdef unsigned int idx
+    for idx in range(numPsms):
+        allScores[idx].score = scores[idx]
+        allScores[idx].label = labels[idx]
+        allScores[idx].index = idx
+    # psmsort(allScores, numPsms)
+    qsort(allScores, numPsms, sizeof(psm), compare)
+    cdef double pi0 = 1.
+    qvals = getQValues(pi0, allScores, numPsms,
+                       skipDecoysPlusOne, verb)
     
     posTot = 0
     ps = []
-    for idx, q in enumerate(qvals):
-        curr_label = allScores[idx][1]
-        curr_og_idx = allScores[idx][2]
+    for idx in range(numPsms):
+        q = qvals[idx]
+        curr_label = allScores[idx].label
+        curr_og_idx = allScores[idx].index
         if curr_label == 1:
             posTot += 1
         ps.append(posTot)
+    free(allScores)
     return qvals, ps
