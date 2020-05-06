@@ -14,7 +14,6 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-
 def torch_tensor_to_np(tensor):
     return tensor.data.cpu().numpy()
 
@@ -277,7 +276,7 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
     """
  
     print('train_model(): train_data: {}, valid_data: {}, test_data: {}'.format(*list(len(x[0]) for x in [train_data, valid_data, test_data])))
-    
+#    TT = g.TimerObj()
     if train:
         train_loss_per_epoch, validation_loss_per_epoch = [], []
         if verbose>0:
@@ -295,12 +294,13 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
         
         times=[]
         for epoch in range(num_epochs):
+#            TT.time('epoch start', show_average=0, b_print=0)
             if snapshot_ensemble_count > 0:
                 update_lr(optimizer, initial_lr, (epoch % lr_reset_every_n_epochs) * 1. / lr_reset_every_n_epochs, total_lr_decay)
             else:
                 update_lr(optimizer, initial_lr, epoch*1./num_epochs, total_lr_decay)
             train_data = permute_data_2(train_data)
-#            batch_order = np.random.permutation(len(train_data))
+#            TT.time('permute data')
             losses=[]
             t0 = time.time()
             for i in range(0, len(train_data[0]), batchsize):
@@ -312,7 +312,7 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
                 optimizer.step()
                 #loss = model.train_on_batch(x=train_data[i], y=train_data[i]['labels'], check_batch_dim=False)
                 losses.append(torch_tensor_to_np(loss))
-
+#            TT.time('train epoch')
             times.append(time.time()-t0)
             val_pred = run_model_on_data(valid_data[0], model, device, batchsize = 2 * batchsize)
             val_acc = validation_metric(val_pred, valid_data[1])
@@ -329,6 +329,7 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
                 print('Epoch {}/{} completed with average loss {:6.4f}; validation {} = {:6.4f}'.format(epoch+1, num_epochs, np.mean(losses), validation_metric.__name__, val_acc))
             train_loss_per_epoch.append(np.mean(losses))
             validation_loss_per_epoch.append(val_acc)
+            #TT.time('other epoch')
         # exclude times[0] as it includes compilation time!
         times.pop(0)
         print('Training @ {:5.3f} epochs/h, {:5.3f} samples/s)'.format(3600./np.mean(times), len(train_data[0])/np.mean(times)))

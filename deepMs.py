@@ -19,7 +19,7 @@ import random
 #import sys
 #import cPickle as pickle
 
-import operator
+#import operator
 from sklearn.utils import check_random_state
 from copy import deepcopy
 from sklearn.svm import LinearSVC as svc
@@ -782,12 +782,7 @@ def mainIter(hyperparams):
 
 
 if __name__ == '__main__':
-    import g
-    #DEFAULT_PIN = '/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/kimDataset.pin' 
-    DEFAULT_PIN = '/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/kimSub0.1.pin'
-    if not g.isfile(DEFAULT_PIN):
-        DEFAULT_PIN = 'Z:/kimSub0.1.pin'
-        
+
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
@@ -796,7 +791,7 @@ if __name__ == '__main__':
     parser.add_option('--method', type = 'int', action= 'store', default = 3, 
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 10, help='number of iterations; runs on multiple splits per iterations.') #4
-    parser.add_option('--pin', type = 'string', action= 'store', default=DEFAULT_PIN, help='input file with *.pin format')
+    parser.add_option('--pin', type = 'string', action= 'store', help='input file with *.pin format')
     parser.add_option('--output_dir', type = 'string', action= 'store', default='/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/model_output/')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
     

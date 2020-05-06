@@ -25,11 +25,11 @@ except ImportError:
     err_print('Module "matplotlib" not available.')
     exit(-1)
 
-import operator
+#import operator
 import itertools
 import numpy
 
-from deepMs import calcQAndNumIdentified, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
+from deepMs import calcQAndNumIdentified #, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
 
 
 def load_percolator_output(filename, scoreKey = "score", maxPerSid = False):
@@ -151,6 +151,7 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label"):
     labels = []
     lineNum = 0
     with open(filename, 'r') as f:
+        print(f)
         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
             lineNum += 1
             label = int(l[labelKey])
@@ -222,8 +223,8 @@ if __name__ == '__main__':
 
     usage = """Usage: %prog [options] label1:IDENT1 ... labeln:IDENTn\n\n
             
-             Example for using on percolator:     python THIS_SCRIPT.py --output Perc.png "Percolator":percTargets.txt:percDecoys.txt
-             Example for using on DNN classifier: python THIS_SCRIPT.py --output DNN.png "MLP":dnn_output.txt
+             Example for using on percolator:     python THIS_SCRIPT.py --output Perc.png "Percolator":score:percTargets.txt:percDecoys.txt
+             Example for using on DNN classifier: python THIS_SCRIPT.py --output DNN.png "MLP":score:dnn_output.txt
              """
              
     desc = ('The positional arguments IDENT1, IDENT2, ..., IDENTn are the '
