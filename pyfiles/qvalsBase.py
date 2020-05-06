@@ -10,6 +10,8 @@ _includeNegativesInResult=True
 _scoreInd=0
 _labelInd=1
 
+
+
 #########################################################
 ################### CV-bin score normalization
 #########################################################
@@ -22,9 +24,9 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     scoreInd = _scoreInd
     labelInd = _labelInd
     # allScores: list of triples consisting of score, label, and index
-    allScores = zip(scores,labels, range(len(scores)))
+    allScores = list(zip(scores,labels, range(len(scores))))
     #--- sort descending
-    allScores.sort(reverse=True)
+    allScores = sorted(allScores, key=lambda x: -x[0])
     pi0 = 1.
     qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
 
@@ -39,8 +41,10 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     d = allScores[0][scoreInd] + 1.
     dScores = sorted([score for score,l in zip(scores,labels) if l != 1])
     if len(dScores):
-        d = dScores[max(0,len(dScores) / 2)]
+        d = dScores[max(0, int(len(dScores) / 2))]
     return u, d
+
+
 
 # #########################################################
 # #########################################################
@@ -65,6 +69,8 @@ def accumulate(iterable, func=operator.add, initial=None):
         total = func(total, element)
         yield total
 
+
+
 ###### TODO: add calculation of pi0 for q-value re-estimation after PSM rescoring
 # def findpi0():
 
@@ -82,7 +88,7 @@ def getMixMaxCounts(combined, h_w_le_z, h_z_le_z):
     cnt_w = 0
     queue = 0
     for idx in range(len(combined)-1, -1, -1):
-        if(combiined[idx][1]==1):
+        if(combined[idx][1]==1):
             cnt_w += 1
         else:
             cnt_z += 1
@@ -92,6 +98,8 @@ def getMixMaxCounts(combined, h_w_le_z, h_z_le_z):
                 h_w_le_z.append(float(cnt_w))
                 h_z_le_z.append(float(cnt_z))
             queue = 0
+
+
 
 def getQValues(pi0, combined, skipDecoysPlusOne = False, verb = -1):
     """ Combined is a list of tuples consisting of: score, label, and feature matrix row index
@@ -135,7 +143,7 @@ def getQValues(pi0, combined, skipDecoysPlusOne = False, verb = -1):
                     estPx_lt_zj = 0.
                 E_f1_mod_run_tot += float(decoyQueue) * estPx_lt_zj * (1.0 - pi0)
                 if verb >= 3:
-                    print "Mix-max num negatives correction: %f vs. %f" % ((1.0 - pi0)*float(n_z_ge_w), E_f1_mod_run_tot)
+                    print ("Mix-max num negatives correction: %f vs. %f" % ((1.0 - pi0)*float(n_z_ge_w), E_f1_mod_run_tot))
 
             if _includeNegativesInResult:
                 targetQueue += decoyQueue
@@ -149,14 +157,17 @@ def getQValues(pi0, combined, skipDecoysPlusOne = False, verb = -1):
     # Below is equivalent to: partial_sum(qvals.rbegin(), qvals.rend(), qvals.rbegin(), min);
     return list(accumulate(qvals[::-1], min))[::-1]
     
+
+
 def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False, verb = -1):
     """Returns q-values and the indices of the positive class such that q <= thresh
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
     # allScores: list of triples consisting of score, label, and index
-    allScores = zip(scores,labels, range(len(scores)))
+    allScores = list(zip(scores, labels, range(len(scores))))
     #--- sort descending
-    allScores.sort(reverse=True)
+    
+    allScores = sorted(allScores, key=lambda x: -x[0])
     pi0 = 1.
     qvals = getQValues(pi0, allScores, skipDecoysPlusOne, verb)
     
@@ -174,14 +185,16 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False, verb = -1):
                 daq.append(curr_og_idx)
     return taq,daq, [qvals[i] for _,_,i in allScores]
 
+
+
 def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
     """Returns q-values and the number of identified spectra at each q-value
     """
     assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
     # allScores: list of triples consisting of score, label, and index
-    allScores = zip(scores,labels, range(len(scores)))
+    allScores = list(zip(scores,labels, range(len(scores))))
     #--- sort descending
-    allScores.sort(reverse=True)
+    allScores = sorted(allScores, key=lambda x: -x[0])
     pi0 = 1.
     qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
     
@@ -189,7 +202,7 @@ def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = Fal
     ps = []
     for idx, q in enumerate(qvals):
         curr_label = allScores[idx][1]
-        curr_og_idx = allScores[idx][2]
+        #curr_og_idx = allScores[idx][2]
         if curr_label == 1:
             posTot += 1
         ps.append(posTot)

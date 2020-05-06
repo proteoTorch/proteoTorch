@@ -1,42 +1,42 @@
 #!/usr/bin/env python
-#
-# Written by John Halloran <jthalloran@ucdavis.edu>
-#
-# Copyright (C) 2020 John Halloran
-# Licensed under the Open Software License version 3.0
-# See COPYING or http://opensource.org/licenses/OSL-3.0
+"""
+Written by John Halloran <jthalloran@ucdavis.edu> (and Gregor Urban <gur9000@outlook.com>)
+
+Copyright (C) 2020 John Halloran and Gregor Urban
+Licensed under the Open Software License version 3.0
+See COPYING or http://opensource.org/licenses/OSL-3.0
+"""
 
 from __future__ import with_statement
 
-import collections
+#import collections
 import csv
-import itertools
-import math
+#import itertools
+#import math
 import optparse
-import os
+#import os
 import random
-import sys
-import cPickle as pickle
+#import sys
+#import cPickle as pickle
 
+import operator
 from sklearn.utils import check_random_state
 from copy import deepcopy
 from sklearn.svm import LinearSVC as svc
 from sklearn import preprocessing
-from pprint import pprint
-import util.args
-import util.iterables
-import struct
-import array
-
-from scipy import linalg, stats
+#from scipy import linalg, stats
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
-from sklearn import mixture
+#from sklearn import mixture
 from svmlin import svmlin
+
 try:
     from qvalues import * # load cython library
 except:
     from pyfiles.qvalsBase import * # import unoptimized q-value calculation
+
+import dnn_code
+import mini_utils
 
 #########################################################
 #########################################################
@@ -57,7 +57,9 @@ _reqIncOver2Iters=0.01
 # General assumed iterators for lists of score tuples
 _scoreInd=0
 _labelInd=1
-_indInd=2 # Used to keep track of feature matrix rows when sorting based on score
+#_indInd=2 # Used to keep track of feature matrix rows when sorting based on score
+
+
 
 #########################################################
 #########################################################
@@ -76,6 +78,8 @@ def doMergeScores(thresh, testSets, scores, Y):
             newScores[ts] = (scores[ts] - u) / (u-d)
     return newScores
 
+
+
 #########################################################
 #########################################################
 ################### I/O functions
@@ -84,19 +88,18 @@ def doMergeScores(thresh, testSets, scores, Y):
 def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
         the spectrum identification number
+
         Normal tide features
         SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
     """
-
     with open(filename, 'r') as f:
         r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
         headerInOrder = r.fieldnames
         l = headerInOrder
         if "ScanNr" not in l:
             raise ValueError("No ScanNr field, exitting")
-        # if "Charge1" not in l:
-        #     raise ValueError("No Charge1 field, exitting")
-
+#        if "Charge1" not in l:
+#            raise ValueError("No Charge1 field, exitting")
         totalPsms = 0
         totalTargets = 0
         targetInds = []
@@ -108,12 +111,11 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
                 targetInds.append(i+1)
             elif row["Label"] == "-1":
                 decoyInds.append(i+1)
-
         subTotal = int(totalPsms * sampleRatio)
-        print len(decoyInds), len(targetInds)
-        print "%d total PSMs, %d targets, %d decoys" % (totalPsms, totalTargets, totalPsms - totalTargets)
-        print "Subsampling %d PSMs" % (subTotal)
-        numTargets = subTotal / 2
+        print(len(decoyInds), len(targetInds))
+        print("%d total PSMs, %d targets, %d decoys" % (totalPsms, totalTargets, totalPsms - totalTargets))
+        print("Subsampling %d PSMs" % (subTotal))
+        numTargets = subTotal // 2
         numDecoys = subTotal - numTargets
         if numDecoys > len(decoyInds):
             m = numDecoys - len(decoyInds)
@@ -124,13 +126,12 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
                 m = numTargets - len(targetInds)
                 numTargets -= m
                 numDecoys += m
-        print len(decoyInds), len(targetInds), numTargets, numDecoys
+        print(len(decoyInds), len(targetInds), numTargets, numDecoys)
         # Randomly sample target and decoy indices
         sampleInds = set(random.sample(targetInds, numTargets))
         # decoyInds = set(random.sample(decoyInds, numDecoys))
         sampleInds |= set(random.sample(decoyInds, numDecoys))
         sampleInds.add(0) # add header line
-
         f.seek(0)
         g = open(outputFile, 'w')
         g2 = []
@@ -148,6 +149,8 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
         g.close()
         if outputFile2:
             g2.close()
+
+
 
 def load_pin_return_featureMatrix(filename):
     """ Load all PSMs and features from a percolator input (PIN) file
@@ -167,12 +170,10 @@ def load_pin_return_featureMatrix(filename):
         ...
         header field m : Protein id m - n - 4
     """
-
     f = open(filename, 'r')
     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
     headerInOrder = r.fieldnames
     l = headerInOrder
-
     sids = [] # keep track of spectrum IDs
     # Check that header fields follow pin schema
     # spectrum identification key for PIN files
@@ -180,7 +181,6 @@ def load_pin_return_featureMatrix(filename):
     sidKey = "ScanNr"
     if "ScanNr" not in l:
         raise ValueError("No ScanNr field, exitting")
-
     constKeys = [l[0]]
     # Check label
     m = l[1]
@@ -188,7 +188,6 @@ def load_pin_return_featureMatrix(filename):
         constKeys.append(l[1])
     # Exclude calcmass and expmass as features
     constKeys += [sidKey, "CalcMass", "ExpMass"]
-
     # Find peptide and protein ID fields
     psmStrings = [l[0]]
     isConstKey = False
@@ -198,50 +197,41 @@ def load_pin_return_featureMatrix(filename):
             isConstKey = True
         if isConstKey:
             constKeys.append(key)
-            psmStrings.append(key)
-            
+            psmStrings.append(key)    
     constKeys = set(constKeys) # exclude these when reserializing data
-
     keys = []
     for h in headerInOrder: # keep order of keys intact
         if h not in constKeys:
             keys.append(h)
-    
     featureNames = []
     for k in keys:
-        featureNames.append(k)
-            
+        featureNames.append(k)  
     targets = {}  # mapping between sids and indices in the feature matrix
     decoys = {}
-
     X = [] # Feature matrix
     Y = [] # labels
     pepstrings = []
     scoreIndex = _scoreInd # column index of the ranking score used by the search algorithm 
     numRows = 0
-    
     # for i, l in enumerate(reader):
     for i, l in enumerate(r):
         try:
             sid = int(l[sidKey])
         except ValueError:
-            print "Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1)
-
+            print("Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1))
         try:
             y = int(l["Label"])
         except ValueError:
-            print "Could not convert label %s on line %d to int, exitting" % (l["Label"], i+1)
+            print("Could not convert label %s on line %d to int, exitting" % (l["Label"], i+1))
         if y != 1 and y != -1:
-            print "Error: encountered label value %d on line %d, can only be -1 or 1, exitting" % (y, i+1)
+            print("Error: encountered label value %d on line %d, can only be -1 or 1, exitting" % (y, i+1))
             exit(-1)
-
         el = []
         for k in keys:
             try:
                 el.append(float(l[k]))
             except ValueError:
-                print "Could not convert feature %s with value %s to float, exitting" % (k, l[k])
-
+                print("Could not convert feature %s with value %s to float, exitting" % (k, l[k]))
         # el_strings = (l["SpecId"], l["Peptide"], l["Proteins"])
         el_strings = [l[k] for k in psmStrings]
         if not _topPsm:
@@ -278,12 +268,12 @@ def load_pin_return_featureMatrix(filename):
                     sids.append(sid)
                     numRows += 1
     f.close()
-
     if _standardNorm:
         return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
     else:
         min_max_scaler = preprocessing.MinMaxScaler()
         return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
+
 
 def writeIdent(output, scores, Y, pepstrings,sids):
     """ Header is: (1) Kind (2) Sid (3) Peptide (4) Score
@@ -297,15 +287,14 @@ def writeIdent(output, scores, Y, pepstrings,sids):
         p = pepstrings[i][1][2:-2]
         score = scores[i]
         if Y[i] == 1:
-            fid.write("t\t%d\t%s\t%f\n"
-                      % (sid,p,score))
+            fid.write("t\t%d\t%s\t%f\n" % (sid,p,score))
             counter += 1
         else:
-            fid.write("d\t%d\t%s\t%f\n"
-                      % (sid,p,score))
+            fid.write("d\t%d\t%s\t%f\n" % (sid,p,score))
             counter += 1
     fid.close()
-    print "Wrote %d PSMs" % counter
+    print("Wrote %d PSMs" % counter)
+
 
 def writeOutput(output, scores, Y, pepstrings,qvals):
     """ Header is: (1)PSMId (2)score (3)q-value (4)peptide (5)Label (6)proteinIds
@@ -325,7 +314,8 @@ def writeOutput(output, scores, Y, pepstrings,qvals):
                   % (psm_id, score, q, p, l, prot_id))
         counter += 1
     fid.close()
-    print "Wrote %d PSMs" % counter
+    print("Wrote %d PSMs" % counter)
+
 
 #########################################################
 #########################################################
@@ -345,19 +335,20 @@ def findInitDirection(X, Y, thresh, featureNames):
         # Check scores multiplied by both 1 and positive -1
         for checkNegBest in range(2):
             if checkNegBest==1:
-                taq, _, _ = calcQ(-1. * scores, Y, thresh, True, _verb)
+                taq, _, _ = calcQ(-1. * scores, Y, thresh, True)
             else:
-                taq, _, _ = calcQ(scores, Y, thresh, True, _verb)
+                taq, _, _ = calcQ(scores, Y, thresh, True)
             if len(taq) > numIdentified:
                 initDirection = i
                 numIdentified = len(taq)
                 negBest = checkNegBest==1
             if _debug and _verb >= 2:
                 if checkNegBest==1:
-                    print "Direction -%d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq))
+                    print("Direction -%d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
                 else:
-                    print "Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq))
+                    print("Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
     return initDirection, numIdentified, negBest
+
 
 def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
     """ Iterate through cross validation training sets and find initial search directions
@@ -374,21 +365,21 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
         # Check scores multiplied by both 1 and positive -1
         for checkNegBest in range(2):
             if checkNegBest==1:
-                taq, _, _ = calcQ(-1. * currScores, Y[trainSids], q, True, _verb)
+                taq, _, _ = calcQ(-1. * currScores, Y[trainSids], q, True)
             else:
-                taq, _, _ = calcQ(currScores, Y[trainSids], q, True, _verb)
+                taq, _, _ = calcQ(currScores, Y[trainSids], q, True)
             if len(taq) > numIdentified:
                 numIdentified = len(taq)
                 negBest = checkNegBest==1
-
         initTaq += numIdentified
         if negBest:
-            print "CV fold %d: could separate %d PSMs in supplied initial direction -%d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            print("CV fold %d: could separate %d PSMs in supplied initial direction -%d, %s" % (kFold, numIdentified, initDir, featureNames[initDir]))
             scores.append(-1. * currScores)
         else:
-            print "CV fold %d: could separate %d PSMs in supplied initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            print("CV fold %d: could separate %d PSMs in supplied initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir]))
             scores.append(currScores)
     return scores, initTaq
+
 
 def searchForInitialDirection_split(keys, X, Y, q, featureNames):
     """ Iterate through cross validation training sets and find initial search directions
@@ -403,13 +394,14 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
 
         initTaq += numIdentified
         if negBest:
-            print "CV fold %d: could separate %d PSMs in initial direction -%d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            print("CV fold %d: could separate %d PSMs in initial direction -%d, %s" % (kFold, numIdentified, initDir, featureNames[initDir]))
             scores.append(-1. * X[trainSids,initDir])
         else:
-            print "CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir])
+            print("CV fold %d: could separate %d PSMs in initial direction %d, %s" % (kFold, numIdentified, initDir, featureNames[initDir]))
             scores.append(X[trainSids,initDir])
         kFold += 1
     return scores, initTaq
+
 
 #########################################################
 #########################################################
@@ -425,24 +417,27 @@ def calculateTargetDecoyRatio(Y):
             numPos+=1
         else:
             numNeg+=1
-
     return float(numPos) / max(1., float(numNeg)), numPos, numNeg
+
 
 def sortRowIndicesBySid(sids):
     """ Sort Scan Identification (SID) keys and retain original row indices of feature matrix X
     """
-    keySids = sorted(zip(sids, range(len(sids))))
+    keySids = sorted(list(zip(sids, range(len(sids)))))
     xRowIndices = [j for (_,j) in keySids]
     sids = [i for (i,_) in  keySids]
     return sids, xRowIndices
 
+
 def getDecoyIdx(labels, ids):
     return [i for i in ids if labels[i] != 1]
+
 
 def doRand():
     global _seed
     _seed=(_seed * 279470273) % 4294967291
     return _seed
+
 
 def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
     trainKeys = []
@@ -459,7 +454,7 @@ def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
     # seed = doRand(seed)
     randIdx = doRand() % folds
     it = 0
-    for k,sid in zip(featureMatRowIndices, sids):
+    for k,sid in list(zip(featureMatRowIndices, sids)):
         if (sid!=prevSid):
             # seed = doRand(seed)
             randIdx = doRand() % folds
@@ -477,21 +472,23 @@ def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
         it += 1
     return trainKeys, testKeys
 
+
 #########################################################
 #########################################################
 ################### Learning algorithms
 #########################################################
 #########################################################
-def doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels):
+def doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels):
     """ Perform LDA on a CV bin
     """
     clf = lda()
     clf.fit(features, labels)
-    validation_scores = clf.decision_function(validateFeatures)
-    tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True, _verb)
+    validation_scores = clf.decision_function(validation_Features)
+    tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
     if _debug and _verb > 1:
-        print "CV finished for fold %d: %d targets identified" % (kFold, len(tp))
+        print("CV finished for fold %d: %d targets identified" % (kFold, len(tp)))
     return validation_scores, len(tp), clf
+
 
 def getPercWeights(currIter, kFold):
     """ Weights to debug overall pipeline
@@ -552,6 +549,7 @@ def getPercWeights(currIter, kFold):
         raise ValueError("%d iteration weights called for, only four iterations of weights available, exitting." % (currIter))
     return clf
 
+
 def getPercKimWeights(currIter, kFold):
     """ Weights to debug overall pipeline
         Percolator optimal CV weights for http://jthalloran.ucdavis.edu/kimDataset.pin.gz
@@ -600,7 +598,8 @@ def getPercKimWeights(currIter, kFold):
         raise ValueError("%d iteration weights called for, only four iterations of weights available, exitting." % (currIter))
     return clf
 
-def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateLabels, 
+
+def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, validation_Labels, 
                     cposes, cfracs, alpha, tron = True, currIter=1):
     bestTaq = -1.
     bestCp = 1.
@@ -614,27 +613,28 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
                 classWeight = {1: alpha * cpos, -1: alpha * cneg}
                 clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-7)
                 clf.fit(features, labels)
-                validation_scores = clf.decision_function(validateFeatures)
+                validation_scores = clf.decision_function(validation_Features)
             else:
                 # clf = getPercWeights(currIter, kFold)
                 # clf = getPercKimWeights(currIter, kFold)
                 clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
-                validation_scores = np.dot(validateFeatures, clf[:-1]) + clf[-1]
-            tp, _, _ = calcQ(validation_scores, validateLabels, thresh, True, _verb)
+                validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
+            tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
             currentTaq = len(tp)
             if _debug and _verb > 2:
-                print "CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq)
+                print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
             if currentTaq > bestTaq:
                 topScores = validation_scores[:]
                 bestTaq = currentTaq
                 bestCp = cpos * alpha
                 bestCn = cneg * alpha
                 bestClf = deepcopy(clf)
-    tp, _, _ = calcQ(topScores, validateLabels, thresh, _verb)
+    tp, _, _ = calcQ(topScores, validation_Labels, thresh)
     bestTaq = len(tp)
     if _debug and _verb > 1:
-        print "CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq)
+        print("CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq))
     return topScores, bestTaq, bestClf
+
 
 #########################################################
 #########################################################
@@ -642,7 +642,7 @@ def doSvmGridSearch(thresh, kFold, features, labels, validateFeatures, validateL
 #########################################################
 #########################################################
 def doTest(thresh, keys, X, Y, ws, svmlin = False):
-    m = len(keys)/3
+#    m = len(keys)/3
     testScores = np.zeros(Y.shape)
     totalTaq = 0
     kFold = 0
@@ -652,12 +652,12 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
             testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
         else:
             testScores[testSids] = w.decision_function(X[testSids])
-        
         # Calculate true positives
-        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False, _verb)
+        tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
         totalTaq += len(tp)
         kFold += 1
     return testScores, totalTaq
+
 
 #########################################################
 #########################################################
@@ -665,11 +665,12 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
 #########################################################
 #########################################################
 def doIter(thresh, keys, scores, X, Y,
-           targetDecoyRatio, method = 0, currIter=1):
+           targetDecoyRatio, method = 0, currIter=1, dnn_hyperparams={}):
     """ Train a classifier on CV bins.
         Method 0: LDA
         Method 1: linear SVM, solver TRON
         Method 2: linear SVM, solver SVMLIN
+        Method 3: DNN (MLP)
     """
     totalTaq = 0 # total number of estimated true positives at q-value threshold
     # record new scores as we go
@@ -687,26 +688,26 @@ def doIter(thresh, keys, scores, X, Y,
         tron = True
         alpha = 0.5
     for cvBinSids in keys:
-        validateSids = cvBinSids
+        validation_Sids = cvBinSids
         # Find training set using q-value analysis
-        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True, _verb)
+        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
         gd = getDecoyIdx(Y, cvBinSids)
         # Debugging check
         if _debug and _verb >= 1:
-            print "CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq))
-
+            print("CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq)))
         # trainSids = list(set(taq) | set(gd))
         trainSids = gd + taq
-
         features = X[trainSids]
         labels = Y[trainSids]
-        validateFeatures = X[validateSids]
-        validateLabels = Y[validateSids]
+        validation_Features = X[validation_Sids]
+        validation_Labels = Y[validation_Sids]
         if method == 0:
-            topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validateFeatures, validateLabels)
-        else:
-            topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validateFeatures, validateLabels,
+            topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
+        elif method in [1, 2]:
+            topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
                                                           cposes, cfracs, alpha, tron, currIter)
+        elif method == 3:
+            topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels, hparams=dnn_hyperparams)
         newScores.append(topScores)
         clfs.append(bestClf)
         estTaq += bestTaq
@@ -714,84 +715,108 @@ def doIter(thresh, keys, scores, X, Y,
     estTaq /= 2
     return newScores, estTaq, clfs
 
-def funcIter(options, output):
-    q = options.q
-    f = options.pin
+
+def mainIter(hyperparams):
+    """
+    
+    """
+    global _seed, _verb
+    _seed=hyperparams['seed']
+    _verb=hyperparams['verbose']
+    
+    output_dir = hyperparams['output_dir']
+    if not output_dir[-1]=='/':
+        output_dir = output_dir + '/'
+    mini_utils.mkdir(output_dir)
+    q = hyperparams['q']
     # target_rows: dictionary mapping target sids to rows in the feature matrix
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
-    pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(f)
+    pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(hyperparams['pin'])
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
-    n = l[0] # number of instances
+    # n = l[0] # number of instances
     m = l[1] # number of features
-
     targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
-    print "Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio)
-
+    print("Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio))
     if _debug and _verb >= 3:
-        print featureNames
+        print(featureNames)
     trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
-
-    t_scores = {}
-    d_scores = {}
-
+    # t_scores = {}
+    # d_scores = {}
     initTaq = 0.
-    initDir = options.initDirection
+    initDir = hyperparams['initDirection']
     if initDir > -1 and initDir < m:
-        print "Using specified initial direction %d" % (initDir)
+        print("Using specified initial direction %d" % (initDir))
         scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
     else:
         scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames)
-    print "Could initially separate %d identifications" % ( initTaq / 2 )
-
+    print("Could initially separate %d identifications" % ( initTaq / 2 ))
     # Iteratre
     fp = 0 # current number of identifications
     fpo = 0 # number of identifications from previous iteration
     fpoo = 0 # number of identifications from previous, previous iteration
-    for i in range(options.maxIters):
-        scores, fp, ws = doIter(q, trainKeys, scores, X, Y,
-                                           targetDecoyRatio, options.method, i)
-        print "Iter %d: estimated %d targets <= q = %f" % (i, fp, q)
+    for i in range(hyperparams['maxIters']):
+        scores, fp, ws = doIter(q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, dnn_hyperparams=hyperparams)
+        print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
-            print "Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo)
+            print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
             break
         fpoo = fpo
         fpo = fp
-    
-    isSvmlin = (options.method==2)
+    isSvmlin = (hyperparams['method']==2)
     testScores, numIdentified = doTest(q, testKeys, X, Y, ws, isSvmlin)
-    print "Identified %d targets <= %f pre-merge." % (numIdentified, q)
+    print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
     if _mergescore:
         scores = doMergeScores(q, testKeys, testScores, Y)
-
-    taq, _, qs = calcQ(scores, Y, q, False, _verb)
-    print "Could identify %d targets" % (len(taq))
+    taq, _, qs = calcQ(scores, Y, q, False)
+    print("Could identify %d targets" % (len(taq)))
     if not _identOutput:
-        writeOutput(output, scores, Y, pepstrings, qs)
+        writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
     else:
-        writeOutput(output, scores, Y, pepstrings, sids0)
+        writeOutput(output_dir+'output.txt', scores, Y, pepstrings, sids0)
+    return None, len(taq), len(taq), output_dir
+
+
+
 
 if __name__ == '__main__':
+    import g
+    #DEFAULT_PIN = '/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/kimDataset.pin' 
+    DEFAULT_PIN = '/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/kimSub0.1.pin'
+    if not g.isfile(DEFAULT_PIN):
+        DEFAULT_PIN = 'Z:/kimSub0.1.pin'
+        
     parser = optparse.OptionParser()
-    parser.add_option('--q', type = 'float', action= 'store', default = 0.5)
+    parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
-    parser.add_option('--initDirection', type = 'int', action= 'store', default = -1)
-    parser.add_option('--verb', type = 'int', action= 'store', default = -1)
-    parser.add_option('--method', type = 'int', action= 'store', default = 2)
-    parser.add_option('--maxIters', type = 'int', action= 'store', default = 10)
-    parser.add_option('--pin', type = 'string', action= 'store')
-    parser.add_option('--outputfile', type = 'string', action= 'store')
+    parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
+    parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
+    parser.add_option('--method', type = 'int', action= 'store', default = 3, 
+                      help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
+    parser.add_option('--maxIters', type = 'int', action= 'store', default = 10, help='number of iterations; runs on multiple splits per iterations.') #4
+    parser.add_option('--pin', type = 'string', action= 'store', default=DEFAULT_PIN, help='input file with *.pin format')
+    parser.add_option('--output_dir', type = 'string', action= 'store', default='/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/model_output/')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
+    
+    parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 500, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
+    parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.05, 
+                      help='learning rate reduced by this factor during training overall (a fraction of this is applied after each epoch).')
+    parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
+    parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
+    parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.2, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--dnn_gpu_id', type = 'int', action= 'store', default = 0, 
+                      help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
+    
 
-    (options, args) = parser.parse_args()
+    (_options, _args) = parser.parse_args()
 
     # Seed random number generator.  To make shuffling nondeterministic, input seed <= -1
-    # if options.seed <= -1:
+    # if _options.seed <= -1:
     #     random.seed()
     # else:
-    #     random.seed(options.seed)
-    _seed=options.seed
-    _verb=options.verb
-    funcIter(options, options.outputfile)
+    #     random.seed(_options.seed)
+    
+    mainIter(_options.__dict__)
