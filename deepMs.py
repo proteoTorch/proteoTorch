@@ -736,6 +736,8 @@ def mainIter(hyperparams):
     pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(hyperparams['pin'])
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
+#    print('not normalizing the data!')
+    X = dnn_code.preprocess_data(X)
     # n = l[0] # number of instances
     m = l[1] # number of features
     targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
@@ -796,8 +798,8 @@ if __name__ == '__main__':
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
     
     parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 500, help='number of epochs for training the DNN model.')
-    parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
-    parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.05, 
+    parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.008, help='learning rate for training the DNN model.')
+    parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.02, 
                       help='learning rate reduced by this factor during training overall (a fraction of this is applied after each epoch).')
     parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
