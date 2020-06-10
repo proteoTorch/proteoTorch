@@ -19,13 +19,96 @@ import torch_utils
 import mini_utils
 import deepMs
 
-
+from deepMs import calcQAndNumIdentified
 
 _DEFAULT_HYPERPARAMS = {'dnn_optimizer': 'adam', 'batchsize': 2500, 'dnn_num_epochs': 500, 
                         'dnn_lr': 0.001, 'l2_reg_const':0,
                         'dnn_num_layers':3, 'dnn_layer_size':264, 'dnn_dropout_rate':0.2,
-                        'dnn_lr_decay':0.2, 'dnn_gpu_id':0, 'snapshot_ensemble_count':10}
+                        'dnn_lr_decay':0.2, 'dnn_gpu_id':0, 'snapshot_ensemble_count':10,
+                        'dnn_label_smoothing_0':1, 'dnn_label_smoothing_1':1, 'dnn_train_qtol':0.002}
 
+
+def q_val_AUC(qTol=0.003):
+    def fn_auc(scores, labels):
+        if labels.ndim==2:
+            labels = np.argmax(labels, axis=1)
+        if scores.ndim==2:
+            scores = np.argmax(scores, axis=1)
+        qs, ps = calcQAndNumIdentified(scores, labels)
+        numIdentifiedAtQ = 0
+        quac = []
+        den = float(len(scores))
+    #    ind0 = -1    
+        for ind, (q, p) in enumerate(zip(qs, ps)):
+            if q > qTol:
+                break
+            numIdentifiedAtQ = float(p)
+            quac.append(numIdentifiedAtQ / den)
+    #        if q < qCurveCheck:
+    #            ind0 = ind
+        # print "Accuracy = %f%%" % (numIdentifiedAtQ / float(len(qs)) * 100)
+        # set AUC weights to uniform 
+        auc = np.trapz(quac)#/len(quac)#/quac[-1]
+    #    if qTol > qCurveCheck:
+    #        auc = 0.3 * auc + 0.7 * np.trapz(quac[:ind0])#/ind0#/quac[ind0-1]
+        return auc
+    return fn_auc
+
+
+
+class label_smoothing_loss(nn.Module):
+    def __init__(self, device, class_confidence_values=[1, 1], class_weights = [1, 1]):
+        """
+        KL-divergence with label smoothing.
+        
+        class_confidence_values:
+            
+            array (length must be num_classes) in range 0...1;
+            values of 1 == no smoothing; 
+            0 == inverse training, where 'correct' class will have zero mass (don't do this...); 
+            0.5 == only half weight to correct class, rest over others.
+            
+        class_weights:
+            
+            applied on a per-sample basis to weight specific classes up or down.
+            
+        """
+        class_confidence_values = np.asarray(class_confidence_values, 'float32')
+        assert np.ndim(class_confidence_values) == 1
+        assert len(class_confidence_values) > 1
+        assert len(class_weights) == len(class_confidence_values)
+        assert np.all(0 <= class_confidence_values) and np.all( class_confidence_values <= 1)
+        
+        super(label_smoothing_loss, self).__init__()
+        self.device = device
+        self.amount = class_confidence_values
+        self.num_classes = len(class_confidence_values)
+        
+        self.soft_distribs = np.zeros((self.num_classes, self.num_classes), 'float32')
+        self.class_weights = np.asarray(class_weights, 'float32')
+        for i in range(self.num_classes):
+            other_amount = (1 - self.amount[i]) / (self.num_classes - 1)
+            self.soft_distribs[i, :] = other_amount
+            self.soft_distribs[i, i] = self.amount[i]
+        
+    def forward(self, output, labels):
+        """
+        output (float) shape: (batch_size, num_classes)
+        labels (long) shape: (batch_size,)
+        """
+        labels = torch_utils.torch_tensor_to_np(labels)
+        tmp2 = torch_utils.numpy_to_pytorch_tensor(self.class_weights[labels], device=self.device)
+        soft_labels = np.zeros((len(labels), self.num_classes), 'float32')
+        soft_labels[np.arange(len(labels)), :] = self.soft_distribs[labels]        
+        tmp = F.kl_div(F.log_softmax(output, 1), torch_utils.numpy_to_pytorch_tensor(soft_labels, device=self.device), reduction='none').mean(1) #'batchmean')
+#        if 0:
+#            #un-weighted loss'
+#            return (tmp).sum() / len(labels)
+#        else:
+        return (tmp2 * tmp).sum() / len(labels)
+
+#TEST_X = label_smoothing_loss([0.95, 0.85])
+#TEST_X.forward(0, [0,1,1,0,0,0,1]) 
 
 
 class MLP_model(nn.Module):
@@ -55,7 +138,6 @@ class MLP_model(nn.Module):
         torch_utils.register_params_in_model(self, params, 'MLP_weights') 
 
     def __call__(self, x):
-        # x = inputs['input_features']
         for lay in self._layers_MLP:
             x = torch.relu(lay(x))
             x = self.dropout(x)
@@ -63,16 +145,14 @@ class MLP_model(nn.Module):
         if self._use_sigmoid_outputs:
             return torch.sigmoid(x)
         else:
-            return x if self.training else F.softmax(x)
+            return x # if self.training==True else F.softmax(x, dim=1)
 
     
-
-def process_data(X):
-    '''
-    shift to 0..1 range.
-    '''
-    mi,ma = X.min(0)[None, :], X.max(0)[None, :]
-    return (X - mi)/(ma - mi + 1e-7)
+#def preprocess_data(X):
+#    '''
+#    zero mean, unit standard deviation
+#    '''
+#    return (X - X.mean(0)[None, :])/(X.std(0)[None, :] + 1e-15)
 
 
 
@@ -83,7 +163,7 @@ class ModelWrapper_like_sklearn(object):
         self._batchsize = batchsize
     
     def decision_function(self, X):
-        return mini_utils.softmax(torch_utils.run_model_on_data(X, self._model, self._device, self._batchsize))[:,1]
+        return torch_utils.run_model_on_data(X, self._model, self._device, self._batchsize)[:,1]
 
 
 
@@ -117,6 +197,13 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     train_data = (np.asarray(train_features).astype('float32'), convert_labels(train_labels))
     valid_data = (np.asarray(validation_Features).astype('float32'), convert_labels(validation_Labels))
     
+    if 0:
+        data_name = hparams['pin'].split('/')[-2]
+        import g
+        if not g.isfile('valid_data_{}_iter_{}.h5'.format(data_name, kFold)):
+            g.save_list_h5('train_data_{}_iter_{}.h5'.format(data_name, kFold), train_data, ['data', 'labels'], 1, 1)
+            g.save_list_h5('valid_data_{}_iter_{}.h5'.format(data_name, kFold), valid_data, ['data', 'labels'], 1, 1)
+    
     if hparams['dnn_optimizer'] == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=hparams['dnn_lr'])
     elif hparams['dnn_optimizer'] == 'sgd':
@@ -124,12 +211,26 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     else:
         raise ValueError('optimizer {} not supported'.format(hparams['dnn_optimizer']))
     
-    (train_acc, val_acc, test_acc), (train_loss_per_epoch, validation_loss_per_epoch) = torch_utils.train_model(
-            model, DEVICE, loss_fn = nn.CrossEntropyLoss(), optimizer=optimizer, train_data=train_data, 
+#    val_metric = q_val_AUC(qTol=hparams['dnn_train_qtol'])
+    val_metric = mini_utils.AUC_up_to_tol_singleQ(qTol=hparams['dnn_train_qtol'])
+    
+    # deal with trainin class imbalance
+    n = len(train_data[1])
+    n1 = np.sum(train_data[1])
+    n2 = n - n1
+    class_1_weight = n / 2. / n1
+    class_2_weight = n / 2. / n2
+    class_weights = (class_1_weight, class_2_weight)
+    print('class_weights', class_weights)
+    #loss_fn = nn.CrossEntropyLoss(),
+    model, (train_acc, val_acc, test_acc), (train_loss_per_epoch, validation_loss_per_epoch) = torch_utils.train_model(
+            model, DEVICE, loss_fn = label_smoothing_loss(DEVICE, [hparams['dnn_label_smoothing_0'], hparams['dnn_label_smoothing_1']], class_weights=class_weights), 
+            optimizer=optimizer, train_data=train_data, 
             valid_data=valid_data, test_data=valid_data, 
             batchsize=hparams['batchsize'], num_epochs=hparams['dnn_num_epochs'], train=True, initial_lr=hparams['dnn_lr'], 
             total_lr_decay=hparams['dnn_lr_decay'], verbose=1, use_early_stopping=True, 
-            validation_metric=mini_utils.AUC_up_to_tol, snapshot_ensemble_count=hparams['snapshot_ensemble_count'])
+            validation_metric=val_metric, validation_check_interval=20,
+            snapshot_ensemble_count=hparams['snapshot_ensemble_count'])
     
     #torch.save(the_model.state_dict(), 'output/' + 'MLP_model_params.h5')
     # grab predictions for class 1

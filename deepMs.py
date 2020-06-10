@@ -31,9 +31,9 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from svmlin import svmlin
 
 try:
-    from qvalues import * # load cython library
+    from qvalues import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified # load cython library
 except:
-    from pyfiles.qvalsBase import * # import unoptimized q-value calculation
+    from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified # import unoptimized q-value calculation
 
 import dnn_code
 import mini_utils
@@ -70,12 +70,12 @@ def doMergeScores(thresh, testSets, scores, Y):
     # record new scores as we go
     newScores = np.zeros(scores.shape)
     for testSids in testSets:
-        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
-        diff = u - d
-        if diff <= 0.:
-            diff = 1.
+#        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+#        diff = u - d
+#        if diff <= 0.:
+#            diff = 1.
         for ts in testSids:
-            newScores[ts] = (scores[ts] - u) / (u-d)
+            newScores[ts] = scores[ts] #(scores[ts] - u) / (u-d)
     return newScores
 
 
@@ -672,7 +672,7 @@ def doIter(thresh, keys, scores, X, Y,
         Method 2: linear SVM, solver SVMLIN
         Method 3: DNN (MLP)
     """
-    totalTaq = 0 # total number of estimated true positives at q-value threshold
+    #totalTaq = 0 # total number of estimated true positives at q-value threshold
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []
@@ -725,8 +725,11 @@ def mainIter(hyperparams):
     _verb=hyperparams['verbose']
     
     output_dir = hyperparams['output_dir']
-    if not output_dir[-1]=='/':
-        output_dir = output_dir + '/'
+    if output_dir is None:
+        output_dir = 'model_output/{}/{}/'.format(hyperparams['pin'].split('/')[-1], mini_utils.TimeStamp())
+    else:
+        if not output_dir[-1]=='/':
+            output_dir = output_dir + '/'
     mini_utils.mkdir(output_dir)
     q = hyperparams['q']
     # target_rows: dictionary mapping target sids to rows in the feature matrix
@@ -737,7 +740,7 @@ def mainIter(hyperparams):
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
 #    print('not normalizing the data!')
-    X = dnn_code.preprocess_data(X)
+#    X = dnn_code.preprocess_data(X)
     # n = l[0] # number of instances
     m = l[1] # number of features
     targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
@@ -774,6 +777,7 @@ def mainIter(hyperparams):
         scores = doMergeScores(q, testKeys, testScores, Y)
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
+    mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))
     if not _identOutput:
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
     else:
@@ -792,20 +796,22 @@ if __name__ == '__main__':
     parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
     parser.add_option('--method', type = 'int', action= 'store', default = 3, 
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
-    parser.add_option('--maxIters', type = 'int', action= 'store', default = 10, help='number of iterations; runs on multiple splits per iterations.') #4
+    parser.add_option('--maxIters', type = 'int', action= 'store', default = 1, help='number of iterations; runs on multiple splits per iterations.') #4
     parser.add_option('--pin', type = 'string', action= 'store', help='input file with *.pin format')
-    parser.add_option('--output_dir', type = 'string', action= 'store', default='/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/model_output/')
+    parser.add_option('--output_dir', type = 'string', action= 'store', default=None) #'/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/model_output/'+mini_utils.TimeStamp()+'/')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
     
-    parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 500, help='number of epochs for training the DNN model.')
-    parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.008, help='learning rate for training the DNN model.')
+    parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
     parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.02, 
                       help='learning rate reduced by this factor during training overall (a fraction of this is applied after each epoch).')
     parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
-    parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.2, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.1, help='dropout rate; must be 0 <= rate < 1.')
     parser.add_option('--dnn_gpu_id', type = 'int', action= 'store', default = 0, 
                       help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
+    parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
+    parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     
 
     (_options, _args) = parser.parse_args()

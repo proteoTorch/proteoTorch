@@ -5,7 +5,7 @@ Copyright (C) 2020 Gregor Urban
 Licensed under the Open Software License version 3.0
 See COPYING or http://opensource.org/licenses/OSL-3.0
 """
-
+import time
 import numpy as np
 from os import makedirs as _makedirs
 from os.path import exists as _exists
@@ -22,7 +22,7 @@ def mkdir(path):
 def softmax(x):
     """Compute softmax values for each sets of scores in x. (numpy)
     """
-    return np.exp(x) / (np.sum(np.exp(x), axis=1)[:, None] + 1e-16)
+    return np.exp(x) / (np.sum(np.exp(x), axis=1)[:, None] + 1e-10)
 
 
 def binary_search(sorted_data, target):
@@ -48,6 +48,11 @@ def binary_search(sorted_data, target):
 
 
 
+def TimeStamp():
+    """can be used inside of file names"""
+    return time.strftime("%m-%d-%Y__%Hh_%Mm_%Ss_", time.localtime(time.time()))+str(time.time()%1)[10:]
+
+
 #########################
 ### MS-Specific Functions
 #########################
@@ -58,7 +63,7 @@ def calcQCompetition_v2(predictions, labels):
     if labels.ndim==2:
         labels = np.argmax(labels, axis=1)
     if predictions.ndim==2:
-        predictions = softmax(predictions)[:,1] #[:, 1] - predictions[:, 0]
+        predictions = predictions[:,1] #softmax() already applied #[:, 1] - predictions[:, 0]
     is_pos_neg = labels[np.argsort(predictions)[::-1]]
     ps = []
     fdrs = []
@@ -66,12 +71,15 @@ def calcQCompetition_v2(predictions, labels):
     fpTot = 0.0
     fdr = 0.0
     for ispos in is_pos_neg:
-        if ispos == 1: posTot += 1.0
-        else: fpTot += 1.0
+        if ispos == 1: 
+            posTot += 1.0
+        else: 
+            fpTot += 1.0
         #--- check for zero positives
-        if posTot == 0.0: fdr = 100.0
-        else: fdr = fpTot / posTot
-        #--- note the q
+        if posTot == 0.0: 
+            fdr = 100.0
+        else: 
+            fdr = fpTot / posTot
         fdrs.append(fdr)
         ps.append(posTot)
     qs = []
@@ -104,12 +112,41 @@ def AUC_up_to_tol(predictions, labels, qTol=0.005, qCurveCheck = 0.001):
     qs, ps = calcQCompetition_v2(predictions, labels)
     idx1 = binary_search(qs, qTol)
     idx2 = binary_search(qs, qCurveCheck)
-    #den = float(np.sum(labels>=1))
+#    den = float(np.sum(labels>=1))
     #print('AUC_upto_Tol: den =',den)
-    auc = np.trapz(ps[:idx1])/len(ps)
+    auc = np.trapz(ps[:idx1])#/den/idx1
     if qTol > qCurveCheck:
-        auc = 0.3 * auc + 0.7 * np.trapz(ps[:idx2])/len(ps)
+        auc = 0.3 * auc + 0.7 * np.trapz(ps[:idx2])#/den/idx2
     return auc
+
+
+def save_text(fname, string, append = False):
+    f=open(fname,'a' if append else 'w')
+    f.write(string)
+    f.close()
+    
+
+def AUC_up_to_tol_singleQ(qTol=0.002):
+    """
+    Re-weighted AUC towards lower q values. Not normalized to 1.
+    
+    Returns:
+        
+        function with inputs: <predictions>, <labels>
+    """
+    def fn(predictions, labels):
+        if labels.ndim==2:
+            labels = np.argmax(labels, axis=1)
+        qs, ps = calcQCompetition_v2(predictions, labels)
+        idx1 = binary_search(qs, qTol)
+    #    idx2 = binary_search(qs, qCurveCheck)
+#        den = float(np.sum(labels>=1))
+        #print('AUC_upto_Tol: den =',den)
+        auc = np.trapz(ps[:idx1])#/den/idx1
+    #    if qTol > qCurveCheck:
+    #        auc = 0.3 * auc + 0.7 * np.trapz(ps[:idx2])/den/idx2
+        return auc
+    return fn
 
 
 

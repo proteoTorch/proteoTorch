@@ -32,7 +32,42 @@ import numpy
 from deepMs import calcQAndNumIdentified #, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
 
 
-def load_percolator_output(filename,  scoreKey = "score", maxPerSid = False, idKey = "PSMId"):
+#
+#def load_percolator_output(filename, scoreKey = "score", maxPerSid = False, idKey = "PSMId"):
+#    """ filename - percolator tab delimited output file
+#    header:
+#    (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
+#    Output:
+#    List of scores
+#    """
+#    if not maxPerSid:
+#        with open(filename, 'r') as f:
+#            return [float(l[scoreKey]) for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
+#
+#    f = open(filename)
+#    reader = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
+#    scoref = lambda r: float(r[scoreKey])
+#    # add all psms
+#    psms = {}
+#    for psmid, rows in itertools.groupby(reader, lambda r: r["PSMId"]):
+#        records = list(rows)
+#        l = psmid.split('_')
+#        sid = int(l[2])
+#        # charge = int(l[3])
+#        if sid in psms:
+#            psms[sid] += records
+#        else:
+#            psms[sid] = records
+#    f.close()
+#    max_scores = []
+#    # take max over psms
+#    for sid in psms:
+#        top_psm = max(psms[sid], key = scoref)
+#        max_scores.append(float(top_psm[scoreKey]))
+#    return max_scores
+
+
+def load_percolator_output(filename, scoreKey = "score", maxPerSid = False, idKey = "PSMId"):
     """ filename - percolator tab delimited output file
     header:
     (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
@@ -48,10 +83,8 @@ def load_percolator_output(filename,  scoreKey = "score", maxPerSid = False, idK
                 ids.append(l[idKey])
             # scores = [float(l[scoreKey]) for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
             return scores, ids
-
     f = open(filename)
     reader = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
-
     scoref = lambda r: float(r[scoreKey])
     # add all psms
     psms = {}
@@ -67,7 +100,6 @@ def load_percolator_output(filename,  scoreKey = "score", maxPerSid = False, idK
         else:
             psms[sid] = records
     f.close()
-
     max_scores = []
     max_ids = []
     # take max over psms
@@ -75,10 +107,10 @@ def load_percolator_output(filename,  scoreKey = "score", maxPerSid = False, idK
         top_psm = max(psms[sid], key = scoref)
         max_scores.append(float(top_psm[scoreKey]))
         max_ids.append(ids[sid])
-
     return max_scores, max_ids
 
-def load_percolator_target_decoy_files(filenames,  scoreKey = "score", maxPerSid = False):
+
+def load_percolator_target_decoy_files(filenames, scoreKey = "score", maxPerSid = False):
     """ filenames - list of percolator tab delimited target and decoy files
     header:
     (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
@@ -91,6 +123,7 @@ def load_percolator_target_decoy_files(filenames,  scoreKey = "score", maxPerSid
     scores = targets + decoys
     labels = [1]*len(targets) + [-1]*len(decoys)
     return scores, labels
+
 
 def refine(scorelists, tdc = True):
     """Create a list of method scores which contain only shared spectra.
@@ -135,7 +168,7 @@ def refine(scorelists, tdc = True):
 def parse_arg(argument):
     """Parse positional arguments of the form 'desc:scoreKey:filename'
     """
-    result = argument.split(':')
+    result = argument if not isinstance(argument, str) else argument.split(':')
     if not result or len(result) < 3:
         err_print('Argument %s not correctly specified.' % argument)
         exit(-2)
@@ -156,6 +189,8 @@ def parse_arg(argument):
             fns.append(fn)
         return (label, scoreKey, fns)
 
+
+
 def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "PSMId"):
     scores = []
     labels = []
@@ -169,9 +204,10 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
                 raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
             labels.append(label)
             scores.append(float(l[scoreKey]))
-            ids.append(l[idKey])
     print("Read %d scores" % (lineNum-1))
     return scores, labels, ids
+
+
 
 def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCurveCheck = 0.001):
     """ Load all PSMs and features file
@@ -201,33 +237,37 @@ def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCur
         auc = 0.3 * auc + 0.7 * np.trapz(quac[:ind0])#/ind0#/quac[ind0-1]
     return qs, ps, auc
 
+
 #############################################
 # Scoring method plotting utilities
 #############################################
+
+
 def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
-  linestyle = [ '-', '-', '-', '-', '-', '-', '-', '-' ]
-  linecolors = [ (0.0, 0.0, 0.0),
-                 (0.8, 0.4, 0.0),
-                 (0.0, 0.45, 0.70),
-                 (0.8, 0.6, 0.7),
-                 (0.0, 0.6, 0.5),
-                 (0.9, 0.6, 0.0),
-                 (0.95, 0.9, 0.25)]
-  xlabel = 'q-value'
-  ylabel = 'Spectra identified'
-  pylab.clf()
-  pylab.xlabel(xlabel)
-  pylab.ylabel(ylabel)
-  # pylab.nipy_spectral()
-  pylab.gray()
-  h = -1
-  for i,(q,p) in enumerate(scorelists):
-      h = max(itertools.chain([h], (b for a, b in zip(q, p) if a <= qrange)))
-      pylab.plot(q, p, color = linecolors[i], linewidth = 2, linestyle = linestyle[i])
-  pylab.xlim([0,qrange])
-  pylab.ylim([0, h])
-  pylab.legend(labels, loc = 'lower right')
-  pylab.savefig(output, bbox_inches='tight')
+    linestyle = [ '-', '-', '-', '-', '-', '-', '-', '-' ]
+    linecolors = [  (0.0, 0.0, 0.0),
+                    (0.8, 0.4, 0.0),
+                    (0.0, 0.45, 0.70),
+                    (0.8, 0.6, 0.7),
+                    (0.0, 0.6, 0.5),
+                    (0.9, 0.6, 0.0),
+                    (0.95, 0.9, 0.25)]
+    xlabel = 'q-value'
+    ylabel = 'Spectra identified'
+    pylab.clf()
+    pylab.xlabel(xlabel)
+    pylab.ylabel(ylabel)
+    # pylab.nipy_spectral()
+    pylab.gray()
+    h = -1
+    for i,(q,p) in enumerate(scorelists):
+        h = max(itertools.chain([h], (b for a, b in zip(q, p) if a <= qrange)))
+        pylab.plot(q, p, color = linecolors[i], linewidth = 2, linestyle = linestyle[i])
+    pylab.xlim([0,qrange])
+    pylab.ylim([0, h])
+    pylab.legend(labels, loc = 'lower right')
+    pylab.savefig(output, bbox_inches='tight')
+
 
 def refineDms(deepMsFile):
     # load scores and take max over unique PSM ids
@@ -248,17 +288,15 @@ def refineDms(deepMsFile):
                     decoys[i] = s
             else:
                 decoys[i] = s
-
     print("Read %d deepMS Target PSMs, %d deepMS Decoy PSMs" % (len(targets), len(decoys)))
     return targets, decoys
+
 
 def refinePerc(percolatorTargetFile, percolatorDecoyFile):
     # load percolator target and decoy files and take max over unique PSM ids
     target_scores, target_ids = load_percolator_output(percolatorTargetFile)
     decoy_scores, decoy_ids = load_percolator_output(percolatorDecoyFile)
-
     print("Read %d Percolator Target PSMs, %d Percolator Decoy PSMs" % (len(target_ids), len(decoy_ids)))
-    
     targets = {}
     decoys = {}
     # first take max over target PSMs, filtering out PSMs not in targetIntersect
@@ -277,37 +315,9 @@ def refinePerc(percolatorTargetFile, percolatorDecoyFile):
             decoys[i] = s
     return targets, decoys
 
-def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotLabels = None):
-    """Scatterplot of the PSM scores for deepMS and Percolator.
-    """
-    dms_targetDict, dms_decoyDict = refineDms(deepMsFile)
-    perc_targetDict, perc_decoyDict = refinePerc(percolatorTargetFile, percolatorDecoyFile)
-
-    # Plot histograms for scoring distributions
-    histogram(dms_targetDict.values(), dms_decoyDict.values(), "deepMsHist.png", 100)
-    histogram(perc_targetDict.values(), perc_decoyDict.values(), "percolatorHist.png", 100)
-
-    target_ids = list(set(dms_targetDict.iterkeys()) & set(perc_targetDict.iterkeys()))
-    decoy_ids = list(set(dms_decoyDict.iterkeys()) & set(perc_decoyDict.iterkeys()))
-
-    t1 = [dms_targetDict[t] for t in target_ids]
-    d1 = [dms_decoyDict[d] for d in decoy_ids]
-    t2 = [perc_targetDict[t] for t in target_ids]
-    d2 = [perc_decoyDict[d] for d in decoy_ids]
-
-    pylab.clf()
-    pylab.scatter(t1, t2, color = 'b', alpha = 0.20, s = 2)
-    pylab.scatter(d1, d2, color = 'r', alpha = 0.10, s = 1)
-    pylab.xlim( (min(min(t1), min(d1)), max(max(t1), max(d1))) )
-    if plotLabels:
-        pylab.xlabel(plotLabels[0])
-        pylab.ylabel(plotLabels[1])
-
-    pylab.savefig(fn)
 
 def histogram(targets, decoys, output, bins = 40, prob = False):
     """Histogram of the score distribution between target and decoy PSMs.
-
     Arguments:
         targets: Iterable of floats, each the score of a target PSM.
         decoys: Iterable of floats, each the score of a decoy PSM.
@@ -316,10 +326,8 @@ def histogram(targets, decoys, output, bins = 40, prob = False):
             formats allowed are those supported by matplotlib: png,
             pdf, svg, ps, eps, tiff.
         bins: Number of bins in the histogram [default: 40].
-
     Effects:
         Outputs the image to the file specified in 'output'.
-
     """
     # decoys = []
     # targets = []
@@ -334,7 +342,7 @@ def histogram(targets, decoys, output, bins = 40, prob = False):
     pylab.ylabel('Frequency')
     if prob:
         pylab.ylabel('Pr(Score)')
-  
+
     l = min(min(decoys), min(targets))
     h = max(max(decoys), max(targets))
     _, _, h1 = pylab.hist(targets, bins = bins, range = (l,h), density = prob,
@@ -344,39 +352,71 @@ def histogram(targets, decoys, output, bins = 40, prob = False):
     pylab.legend((h1[0], h2[0]), ('Target Scores', 'Decoy Scores'), loc = 'best')
     pylab.savefig('%s' % output)
 
-if __name__ == '__main__':
 
-    usage = """Usage: %prog [options] label1:IDENT1 ... labeln:IDENTn\n\n
+def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotLabels = None):
+    """Scatterplot of the PSM scores for deepMS and Percolator.
+    """
+    dms_targetDict, dms_decoyDict = refineDms(deepMsFile)
+    perc_targetDict, perc_decoyDict = refinePerc(percolatorTargetFile, percolatorDecoyFile)
+    # Plot histograms for scoring distributions
+    histogram(dms_targetDict.values(), dms_decoyDict.values(), "deepMsHist.png", 100)
+    histogram(perc_targetDict.values(), perc_decoyDict.values(), "percolatorHist.png", 100)
+    target_ids = list(set(dms_targetDict.iterkeys()) & set(perc_targetDict.iterkeys()))
+    decoy_ids = list(set(dms_decoyDict.iterkeys()) & set(perc_decoyDict.iterkeys()))
+    t1 = [dms_targetDict[t] for t in target_ids]
+    d1 = [dms_decoyDict[d] for d in decoy_ids]
+    t2 = [perc_targetDict[t] for t in target_ids]
+    d2 = [perc_decoyDict[d] for d in decoy_ids]
+    pylab.clf()
+    pylab.scatter(t1, t2, color = 'b', alpha = 0.20, s = 2)
+    pylab.scatter(d1, d2, color = 'r', alpha = 0.10, s = 1)
+    pylab.xlim( (min(min(t1), min(d1)), max(max(t1), max(d1))) )
+    if plotLabels:
+        pylab.xlabel(plotLabels[0])
+        pylab.ylabel(plotLabels[1])
+    pylab.savefig(fn)
+
+
+def main(args, output, maxq):
+    '''
+    input:
+        
+        list of tuples; each tuple contains either:
             
-             Example for using on percolator:     python THIS_SCRIPT.py --output Perc.png "Percolator":score:percTargets.txt:percDecoys.txt
-             Example for using on DNN classifier: python THIS_SCRIPT.py --output DNN.png "MLP":score:dnn_output.txt
-             """
-             
-    desc = ('The positional arguments IDENT1, IDENT2, ..., IDENTn are the '
-            'names of spectrum identification files.')
-
-    parser = optparse.OptionParser(usage = usage, description = desc)
-
-    parser.add_option('--output', type = 'string', default='figure.png', help = 'Output file name where the figure will be stored.')
-    parser.add_option('--maxq', type = 'float', default = 1.0, help = 'Maximum q-value to plot to: 0 < q <= 1.0')
-#    parser.add_option('--is_perc', type = 'int', default = 0, help = 'Bool: pass "1" if using this script on percolator output, otherwise 0.')
-
-    (options, args) = parser.parse_args()
-
-    assert len(args) >= 1, 'No identification and model output files listed.'
-
+            ("Percolator", "score", "percTargets.txt", "percDecoys.txt")
+            
+            ("DNN", "score", "dnn_output.txt")
+    '''
     methods = []
     scorelists = []
-
     def process(arg, silent = False):
         desc, scoreKey, fn = parse_arg(arg)
         methods.append(desc)
         qs, ps, auc = load_test_scores(fn, scoreKey)
         scorelists.append( (qs, ps) )
         print ('%s: %d identifications, AUC = %f' % (desc, len(qs), auc))
-
     for argument in args:
         process(argument)
-
     # scorelists = refine(scorelists)
-    plot(scorelists, options.output, options.maxq, methods)
+    plot(scorelists, output, maxq, methods)
+
+
+
+if __name__ == '__main__':
+    usage = """Usage: %prog [options] label1:IDENT1 ... labeln:IDENTn\n\n
+            
+             Example for using on percolator:     python THIS_SCRIPT.py --output Perc.png "Percolator":score:percTargets.txt:percDecoys.txt
+             Example for using on DNN classifier: python THIS_SCRIPT.py --output DNN.png "DNN":score:dnn_output.txt
+             """             
+    desc = ('The positional arguments IDENT1, IDENT2, ..., IDENTn are the '
+            'names of spectrum identification files.')
+    parser = optparse.OptionParser(usage = usage, description = desc)
+    parser.add_option('--output', type = 'string', default='figure.png', help = 'Output file name where the figure will be stored.')
+    parser.add_option('--maxq', type = 'float', default = 1.0, help = 'Maximum q-value to plot to: 0 < q <= 1.0')
+#    parser.add_option('--is_perc', type = 'int', default = 0, help = 'Bool: pass "1" if using this script on percolator output, otherwise 0.')
+
+    (OPTIONS, ARGS) = parser.parse_args()
+
+    assert len(ARGS) >= 1, 'No identification and model output files listed.'
+    main(ARGS, OPTIONS.output, OPTIONS.maxq)
+    
