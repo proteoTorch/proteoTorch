@@ -204,6 +204,7 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
                 raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
             labels.append(label)
             scores.append(float(l[scoreKey]))
+            ids.append(l[idKey])
     print("Read %d scores" % (lineNum-1))
     return scores, labels, ids
 
@@ -272,6 +273,7 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
 def refineDms(deepMsFile):
     # load scores and take max over unique PSM ids
     scores, labels, ids = load_pin_scores(deepMsFile)
+    print("Read %d scores, %d labels, %d ids" % (len(scores), len(labels), len(ids)))
     decoys = {}
     targets = {}
     # take max per PSM id
@@ -361,8 +363,8 @@ def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotL
     # Plot histograms for scoring distributions
     histogram(dms_targetDict.values(), dms_decoyDict.values(), "deepMsHist.png", 100)
     histogram(perc_targetDict.values(), perc_decoyDict.values(), "percolatorHist.png", 100)
-    target_ids = list(set(dms_targetDict.iterkeys()) & set(perc_targetDict.iterkeys()))
-    decoy_ids = list(set(dms_decoyDict.iterkeys()) & set(perc_decoyDict.iterkeys()))
+    target_ids = list(set(dms_targetDict) & set(perc_targetDict))
+    decoy_ids = list(set(dms_decoyDict) & set(perc_decoyDict))
     t1 = [dms_targetDict[t] for t in target_ids]
     d1 = [dms_decoyDict[d] for d in decoy_ids]
     t2 = [perc_targetDict[t] for t in target_ids]
