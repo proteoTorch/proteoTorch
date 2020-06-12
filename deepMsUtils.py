@@ -276,7 +276,7 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
 
 
 def decileInfo(scores, labels):
-    # Print number of decoy in each decile
+    # Print target/decoy ratios per decile
     decileRatios = [0.] * 10
     decileTargets = [0.] * 10
     decileDecoys = [0.] * 10
@@ -305,17 +305,15 @@ def decileInfo(scores, labels):
     decileRatios[currDecile] = float(numTargetsInDecile) / float(numDecoysInDecile)
 
     print("Target/decoy info per decile")
-    print("Decile\t#Targets#Decoys\t#Targets\t#Decoys")
+    print("Decile\t#Targets/#Decoys\t#Targets\t#Decoys")
     for i, (r, t, d) in enumerate(zip(decileRatios, decileTargets, decileDecoys)):
         print("%d\t%f\t%d\t%d" % (i, r, t, d))
-        
 
 def refineDms(deepMsFile):
     # load scores and take max over unique PSM ids
     scores, labels, ids = load_pin_scores(deepMsFile)
     print("DeepMS decile info")
     decileInfo(scores, labels)
-    print("Read %d scores, %d labels, %d ids" % (len(scores), len(labels), len(ids)))
     decoys = {}
     targets = {}
     # take max per PSM id
