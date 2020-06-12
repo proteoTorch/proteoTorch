@@ -274,7 +274,48 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
     pylab.legend(labels, loc = 'lower right')
     pylab.savefig(output, bbox_inches='tight')
 
+def scatterDecoyRanks(ranksA, ranksB):
+    fn = "decoyRanks.png"
+    pylab.clf()
+    pylab.scatter(ranksA, ranksB, color = 'b')
+    pylab.xlabel("DeepMS")
+    pylab.ylabel("Percolator")
+    pylab.savefig(fn)
 
+def writeDisagreedDecoys(psmsA, labelsA, psmsB, labelsB, psmsIds,
+                         outputFile,
+                         threshA = 0.9, threshB = 0.8):
+    # Filter out decoy PSMs for which scoring method A assigns scores with rank >= threshA and method B 
+    # assigns scores with rank <= 0.5
+    assert(len(psmsA)==len(psmsB))
+
+    # g = open('decoyRanks', 'w')
+    with open(outputFile, 'w') as f:
+        denom = float(len(psmsA))
+        ranksA = {}
+        for i, (score, label, psmId) in enumerate(sorted(zip(psmsA, labelsA, psmsIds), key = lambda x: x[0])):
+            ranksA[psmId] = float(i) / denom
+
+        # rA = []
+        # rB = []
+        counter=0
+        for i, (score, label, psmId) in enumerate(sorted(zip(psmsB, labelsB, psmsIds), key = lambda x: x[0])):
+            if(label==-1):
+                rankB = i / denom
+                rankA = ranksA[psmId]
+                # g.write("%f\t%f\n" % (rankA, rankB))
+                if(rankB <= threshB and rankA >= threshA):
+                    f.write("%s\n" % psmId)
+                    counter += 1
+
+        print("%d decoy PSMs where method A ranks >= %f and method B ranks <= %f" % (counter, threshA, threshB))
+
+                # rA.append(rankA)
+                # rB.append(rankB)
+        # scatterDecoyRanks(rA, rB)
+
+    # g.close()
+    
 def decileInfo(scores, labels):
     # Print target/decoy ratios per decile
     decileRatios = [0.] * 10
@@ -393,6 +434,7 @@ def histogram(targets, decoys, output, bins = 40, prob = False):
 def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotLabels = None):
     """Scatterplot of the PSM scores for deepMS and Percolator.
     """
+    # Gather intersection of target/decoy PSMs between the two methods
     dms_targetDict, dms_decoyDict = refineDms(deepMsFile)
     perc_targetDict, perc_decoyDict = refinePerc(percolatorTargetFile, percolatorDecoyFile)
     # Plot histograms for scoring distributions
@@ -411,6 +453,14 @@ def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotL
     d1 = [dms_decoyDict[d] for d in decoy_ids]
     t2 = [perc_targetDict[t] for t in target_ids]
     d2 = [perc_decoyDict[d] for d in decoy_ids]
+    
+    threshA = 0.9
+    threshB = 0.8
+    disagreedOutputFile = baseFileName + "aThresh%.2f_bThresh%.2f_decoyPsms.txt" % (threshA, threshB)
+    writeDisagreedDecoys(t1+d1, [1]*len(t1) + [-1]*len(d1), 
+                         t2+d2, [1]*len(t2) + [-1]*len(d2), target_ids+decoy_ids,
+                         disagreedOutputFile, threshA, threshB)
+
     pylab.clf()
     pylab.scatter(t1, t2, color = 'b', alpha = 0.20, s = 2)
     pylab.scatter(d1, d2, color = 'r', alpha = 0.10, s = 1)
