@@ -9,25 +9,16 @@ See COPYING or http://opensource.org/licenses/OSL-3.0
 
 from __future__ import with_statement
 
-#import collections
 import csv
-#import itertools
-#import math
 import optparse
-#import os
 import random
-#import sys
-#import cPickle as pickle
 
-#import operator
 from sklearn.utils import check_random_state
 from copy import deepcopy
 from sklearn.svm import LinearSVC as svc
 from sklearn import preprocessing
-#from scipy import linalg, stats
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
-#from sklearn import mixture
 from svmlin import svmlin
 
 try:

@@ -204,7 +204,12 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
                 raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
             labels.append(label)
             scores.append(float(l[scoreKey]))
-            ids.append(l[idKey])
+            if idKey in l:
+                ids.append(l[idKey])
+            else:
+                if 'SpecId' in l:
+                    idKey = 'SpecId'
+                    ids.append(l[idKey])
     print("Read %d scores" % (lineNum-1))
     return scores, labels, ids
 
@@ -270,9 +275,46 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
     pylab.savefig(output, bbox_inches='tight')
 
 
+def decileInfo(scores, labels):
+    # Print number of decoy in each decile
+    decileRatios = [0.] * 10
+    decileTargets = [0.] * 10
+    decileDecoys = [0.] * 10
+    inc = int(np.ceil(float(len(scores)) / 10.))
+    decile = inc
+
+    currDecile = 0
+    numTargetsInDecile = 0
+    numDecoysInDecile = 0
+    for ind, (score,label) in enumerate(sorted(zip(scores, labels), key = lambda x: x[0])):
+        if ind < decile:
+            if label==1:
+                numTargetsInDecile += 1
+            else:
+                numDecoysInDecile += 1
+        else:
+            decileTargets[currDecile] = numTargetsInDecile
+            decileDecoys[currDecile] = numDecoysInDecile
+            decileRatios[currDecile] = float(numTargetsInDecile) / float(numDecoysInDecile)
+            currDecile += 1
+            decile += inc
+            numTargetsInDecile = 0
+            numDecoysInDecile = 0
+    decileTargets[currDecile] = numTargetsInDecile
+    decileDecoys[currDecile] = numDecoysInDecile
+    decileRatios[currDecile] = float(numTargetsInDecile) / float(numDecoysInDecile)
+
+    print("Target/decoy info per decile")
+    print("Decile\t#Targets#Decoys\t#Targets\t#Decoys")
+    for i, (r, t, d) in enumerate(zip(decileRatios, decileTargets, decileDecoys)):
+        print("%d\t%f\t%d\t%d" % (i, r, t, d))
+        
+
 def refineDms(deepMsFile):
     # load scores and take max over unique PSM ids
     scores, labels, ids = load_pin_scores(deepMsFile)
+    print("DeepMS decile info")
+    decileInfo(scores, labels)
     print("Read %d scores, %d labels, %d ids" % (len(scores), len(labels), len(ids)))
     decoys = {}
     targets = {}
@@ -298,6 +340,9 @@ def refinePerc(percolatorTargetFile, percolatorDecoyFile):
     # load percolator target and decoy files and take max over unique PSM ids
     target_scores, target_ids = load_percolator_output(percolatorTargetFile)
     decoy_scores, decoy_ids = load_percolator_output(percolatorDecoyFile)
+    print("Percolator decile info")
+    decileInfo(target_scores + decoy_scores, [1]*len(target_scores) + [-1]*len(decoy_scores))
+
     print("Read %d Percolator Target PSMs, %d Percolator Decoy PSMs" % (len(target_ids), len(decoy_ids)))
     targets = {}
     decoys = {}
@@ -331,14 +376,6 @@ def histogram(targets, decoys, output, bins = 40, prob = False):
     Effects:
         Outputs the image to the file specified in 'output'.
     """
-    # decoys = []
-    # targets = []
-    # for s,l in zip(scores,labels):
-    #     if l==1:
-    #         targets.append(s)
-    #     else:
-    #         decoys.append(s)
-
     pylab.clf()
     pylab.xlabel('Score')
     pylab.ylabel('Frequency')
@@ -361,8 +398,15 @@ def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotL
     dms_targetDict, dms_decoyDict = refineDms(deepMsFile)
     perc_targetDict, perc_decoyDict = refinePerc(percolatorTargetFile, percolatorDecoyFile)
     # Plot histograms for scoring distributions
-    histogram(dms_targetDict.values(), dms_decoyDict.values(), "deepMsHist.png", 100)
-    histogram(perc_targetDict.values(), perc_decoyDict.values(), "percolatorHist.png", 100)
+    baseFileName = os.path.splitext(fn)[0]
+    if plotLabels:
+        histA = baseFileName + plotLabels[0] + 'Hist.png'
+        histB = baseFileName + plotLabels[1] + 'Hist.png'
+    else:
+        histA = baseFileName + "deepMsHist.png"
+        histB = baseFileName + "percolatorHist.png"
+    histogram(dms_targetDict.values(), dms_decoyDict.values(), histA, 100)
+    histogram(perc_targetDict.values(), perc_decoyDict.values(), histB, 100)
     target_ids = list(set(dms_targetDict) & set(perc_targetDict))
     decoy_ids = list(set(dms_decoyDict) & set(perc_decoyDict))
     t1 = [dms_targetDict[t] for t in target_ids]
