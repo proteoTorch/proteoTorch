@@ -25,47 +25,11 @@ except ImportError:
     err_print('Module "matplotlib" not available.')
     exit(-1)
 
-#import operator
 import itertools
 import numpy
 
-from deepMs import calcQAndNumIdentified #, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
-
-
-#
-#def load_percolator_output(filename, scoreKey = "score", maxPerSid = False, idKey = "PSMId"):
-#    """ filename - percolator tab delimited output file
-#    header:
-#    (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
-#    Output:
-#    List of scores
-#    """
-#    if not maxPerSid:
-#        with open(filename, 'r') as f:
-#            return [float(l[scoreKey]) for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)]
-#
-#    f = open(filename)
-#    reader = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
-#    scoref = lambda r: float(r[scoreKey])
-#    # add all psms
-#    psms = {}
-#    for psmid, rows in itertools.groupby(reader, lambda r: r["PSMId"]):
-#        records = list(rows)
-#        l = psmid.split('_')
-#        sid = int(l[2])
-#        # charge = int(l[3])
-#        if sid in psms:
-#            psms[sid] += records
-#        else:
-#            psms[sid] = records
-#    f.close()
-#    max_scores = []
-#    # take max over psms
-#    for sid in psms:
-#        top_psm = max(psms[sid], key = scoref)
-#        max_scores.append(float(top_psm[scoreKey]))
-#    return max_scores
-
+from deepMs import calcQAndNumIdentified, givenPsmIds_writePin, load_pin_return_featureMatrix
+ #, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
 
 def load_percolator_output(filename, scoreKey = "score", maxPerSid = False, idKey = "PSMId"):
     """ filename - percolator tab delimited output file
@@ -282,9 +246,9 @@ def scatterDecoyRanks(ranksA, ranksB):
     pylab.ylabel("Percolator")
     pylab.savefig(fn)
 
-def writeDisagreedDecoys(psmsA, labelsA, psmsB, labelsB, psmsIds,
-                         outputFile,
-                         threshA = 0.9, threshB = 0.8):
+def disagreedDecoys(psmsA, labelsA, psmsB, labelsB, psmsIds,
+                    outputFile,
+                    threshA = 0.9, threshB = 0.8):
     # Filter out decoy PSMs for which scoring method A assigns scores with rank >= threshA and method B 
     # assigns scores with rank <= 0.5
     assert(len(psmsA)==len(psmsB))
@@ -299,6 +263,7 @@ def writeDisagreedDecoys(psmsA, labelsA, psmsB, labelsB, psmsIds,
         # rA = []
         # rB = []
         counter=0
+        f.write("PSMId\n")
         for i, (score, label, psmId) in enumerate(sorted(zip(psmsB, labelsB, psmsIds), key = lambda x: x[0])):
             if(label==-1):
                 rankB = i / denom
@@ -455,11 +420,11 @@ def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotL
     d2 = [perc_decoyDict[d] for d in decoy_ids]
     
     threshA = 0.9
-    threshB = 0.8
+    threshB = 0.85
     disagreedOutputFile = baseFileName + "aThresh%.2f_bThresh%.2f_decoyPsms.txt" % (threshA, threshB)
-    writeDisagreedDecoys(t1+d1, [1]*len(t1) + [-1]*len(d1), 
-                         t2+d2, [1]*len(t2) + [-1]*len(d2), target_ids+decoy_ids,
-                         disagreedOutputFile, threshA, threshB)
+    disagreedDecoys(t1+d1, [1]*len(t1) + [-1]*len(d1), 
+                    t2+d2, [1]*len(t2) + [-1]*len(d2), target_ids+decoy_ids,
+                    disagreedOutputFile, threshA, threshB)
 
     pylab.clf()
     pylab.scatter(t1, t2, color = 'b', alpha = 0.20, s = 2)
@@ -470,6 +435,61 @@ def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotL
         pylab.ylabel(plotLabels[1])
     pylab.savefig(fn)
 
+def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
+    """ Plot histograms for all features in a given feature matrix
+    """
+    print(pin)
+    _, X0, Y0, _, _ = load_pin_return_featureMatrix(pin, normalize = False)
+    X, Y, featureNames = givenPsmIds_writePin(pin, psmIds)
+
+    print(X.shape)
+    try:
+        os.mkdir(output_dir)
+    except OSError:
+        print("Failed to create output directory %s, exitting." % output_dir)
+
+    for i, feature in enumerate(featureNames):
+        output = output_dir + '/' + feature + '0.png'
+        # First plot total feature histogram
+        x = X0[:,i]
+        targets = []
+        decoys = []
+        for x,l in zip(x,Y0):
+            if l == 1:
+                targets.append(x)
+            else:
+                decoys.append(x)
+
+        pylab.clf()
+        pylab.xlabel('Score')
+        pylab.ylabel('Frequency')
+        if prob:
+            pylab.ylabel('Pr(Score)')
+
+        l = min(min(decoys), min(targets))
+        h = max(max(decoys), max(targets))
+        _, _, h1 = pylab.hist(targets, bins = bins, range = (l,h), density = prob,
+                              color = 'b', alpha = 0.25)
+        _, _, h2 = pylab.hist(decoys, bins = bins, range = (l,h), density = prob,
+                              color = 'm', alpha = 0.25)
+        pylab.legend((h1[0], h2[0]), ('Target Scores', 'Decoy Scores'), loc = 'best')
+        pylab.savefig('%s' % output)
+
+        # Next, subset
+        output = output_dir + '/' + feature + '.png'
+        # First plot total feature histogram
+        x = X[:,i]
+        pylab.clf()
+        pylab.xlabel('Score')
+        pylab.ylabel('Frequency')
+        if prob:
+            pylab.ylabel('Pr(Score)')
+
+        l = min(x)
+        h = max(x)
+        _, _, h1 = pylab.hist(x, bins = bins, range = (l,h), density = prob,
+                              color = 'b')
+        pylab.savefig('%s' % output)
 
 def main(args, output, maxq):
     '''

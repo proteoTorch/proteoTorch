@@ -89,8 +89,6 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
         l = headerInOrder
         if "ScanNr" not in l:
             raise ValueError("No ScanNr field, exitting")
-#        if "Charge1" not in l:
-#            raise ValueError("No Charge1 field, exitting")
         totalPsms = 0
         totalTargets = 0
         targetInds = []
@@ -141,9 +139,81 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
         if outputFile2:
             g2.close()
 
+def givenPsmIds_writePin(filename, psmIdFile):
+    """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
+        the spectrum identification number
+
+        Normal tide features
+        SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
+    """
+    with open(psmIdFile, 'r') as f0:
+        psms = set([l["PSMId"] for l in csv.DictReader(f0)])
+        print("Loaded %d PMS IDs" % len(psms))
+
+    with open(filename, 'r') as f:
+        r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
+        headerInOrder = r.fieldnames
+        l = headerInOrder
+        sids = [] # keep track of spectrum IDs
+        # Check that header fields follow pin schema
+        # spectrum identification key for PIN files
+        # Note: this string must be stated exactly as the third header field
+        sidKey = "ScanNr"
+        if "ScanNr" not in l:
+            raise ValueError("No ScanNr field, exitting")
+        constKeys = [l[0]]
+        # Check label
+        m = l[1]
+        if m.lower() == 'label':
+            constKeys.append(l[1])
+        # Exclude calcmass and expmass as features
+        constKeys += [sidKey, "CalcMass", "ExpMass"]
+        # Find peptide and protein ID fields
+        psmStrings = [l[0]]
+        isConstKey = False
+        for key in headerInOrder:
+            m = key.lower()
+            if m=="peptide":
+                isConstKey = True
+            if isConstKey:
+                constKeys.append(key)
+                psmStrings.append(key)    
+        constKeys = set(constKeys) # exclude these when reserializing data
+        keys = []
+        for h in headerInOrder: # keep order of keys intact
+            if h not in constKeys:
+                keys.append(h)
+        featureNames = []
+        for k in keys:
+            featureNames.append(k)  
+        targets = {}  # mapping between sids and indices in the feature matrix
+        decoys = {}
+        X = [] # Feature matrix
+        Y = [] # labels
+        for i, l in enumerate(r):
+            if l["SpecId"] not in psms:
+                continue
+            try:
+                y = int(l["Label"])
+            except ValueError:
+                print("Could not convert label %s on line %d to int, exitting" % (l["Label"], i+1))
+            if y != 1 and y != -1:
+                print("Error: encountered label value %d on line %d, can only be -1 or 1, exitting" % (y, i+1))
+                exit(-1)
+            el = []
+            for k in keys:
+                try:
+                    el.append(float(l[k]))
+                except ValueError:
+                    print("Could not convert feature %s with value %s to float, exitting" % (k, l[k]))
+            el_strings = [l[k] for k in psmStrings]
+            X.append(el)
+            Y.append(y)
+
+    return np.array(X), Y, featureNames
 
 
-def load_pin_return_featureMatrix(filename):
+def load_pin_return_featureMatrix(filename, normalize = True):
     """ Load all PSMs and features from a percolator input (PIN) file
         
         For n input features and m total file fields, the file format is:
@@ -194,6 +264,8 @@ def load_pin_return_featureMatrix(filename):
     for h in headerInOrder: # keep order of keys intact
         if h not in constKeys:
             keys.append(h)
+    # featureNames = ['XCorr', 'PepLen', 'deltLCn', 'lnNumDSP', 'dM', 'absdM']
+    # keys = ['XCorr', 'PepLen', 'deltLCn', 'lnNumDSP', 'dM', 'absdM']
     featureNames = []
     for k in keys:
         featureNames.append(k)  
@@ -223,7 +295,6 @@ def load_pin_return_featureMatrix(filename):
                 el.append(float(l[k]))
             except ValueError:
                 print("Could not convert feature %s with value %s to float, exitting" % (k, l[k]))
-        # el_strings = (l["SpecId"], l["Peptide"], l["Proteins"])
         el_strings = [l[k] for k in psmStrings]
         if not _topPsm:
             X.append(el)
@@ -259,12 +330,14 @@ def load_pin_return_featureMatrix(filename):
                     sids.append(sid)
                     numRows += 1
     f.close()
+    if not normalize:
+        return pepstrings, np.array(X), np.array(Y), featureNames, sids
+
     if _standardNorm:
         return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
     else:
         min_max_scaler = preprocessing.MinMaxScaler()
         return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
-
 
 def writeIdent(output, scores, Y, pepstrings,sids):
     """ Header is: (1) Kind (2) Sid (3) Peptide (4) Score

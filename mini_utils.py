@@ -1,7 +1,7 @@
 """
-Written by Gregor Urban <gur9000@outlook.com>
+Written by Gregor Urban <gur9000@outlook.com> (and John Halloran <jthalloran@ucdavis.edu>)
 
-Copyright (C) 2020 Gregor Urban
+Copyright (C) 2020 Gregor Urban and John Halloran
 Licensed under the Open Software License version 3.0
 See COPYING or http://opensource.org/licenses/OSL-3.0
 """
@@ -10,6 +10,7 @@ import numpy as np
 from os import makedirs as _makedirs
 from os.path import exists as _exists
 
+from deepMs import calcQAndNumIdentified
 #####################
 ### Generic Functions
 #####################
@@ -64,36 +65,38 @@ def calcQCompetition_v2(predictions, labels):
         labels = np.argmax(labels, axis=1)
     if predictions.ndim==2:
         predictions = predictions[:,1] #softmax() already applied #[:, 1] - predictions[:, 0]
-    is_pos_neg = labels[np.argsort(predictions)[::-1]]
-    ps = []
-    fdrs = []
-    posTot = 0.0
-    fpTot = 0.0
-    fdr = 0.0
-    for ispos in is_pos_neg:
-        if ispos == 1: 
-            posTot += 1.0
-        else: 
-            fpTot += 1.0
-        #--- check for zero positives
-        if posTot == 0.0: 
-            fdr = 100.0
-        else: 
-            fdr = fpTot / posTot
-        fdrs.append(fdr)
-        ps.append(posTot)
-    qs = []
-    lastQ = 100.0
-    for idx in range(len(fdrs)-1, -1, -1):
-        q = 0.0
-        #--- q can never go up. 
-        if lastQ < fdrs[idx]:
-            q = lastQ
-        else:
-            q = fdrs[idx]
-        lastQ = q
-        qs.append(q)
-    qs.reverse()
+
+    qs, ps = calcQAndNumIdentified(predictions, labels)
+    # is_pos_neg = labels[np.argsort(predictions)[::-1]]
+    # ps = []
+    # fdrs = []
+    # posTot = 0.0
+    # fpTot = 0.0
+    # fdr = 0.0
+    # for ispos in is_pos_neg:
+    #     if ispos == 1: 
+    #         posTot += 1.0
+    #     else: 
+    #         fpTot += 1.0
+    #     #--- check for zero positives
+    #     if posTot == 0.0: 
+    #         fdr = 100.0
+    #     else: 
+    #         fdr = fpTot / posTot
+    #     fdrs.append(fdr)
+    #     ps.append(posTot)
+    # qs = []
+    # lastQ = 100.0
+    # for idx in range(len(fdrs)-1, -1, -1):
+    #     q = 0.0
+    #     #--- q can never go up. 
+    #     if lastQ < fdrs[idx]:
+    #         q = lastQ
+    #     else:
+    #         q = fdrs[idx]
+    #     lastQ = q
+    #     qs.append(q)
+    # qs.reverse()
     return np.asarray(qs, 'float32'), np.asarray(ps, 'float32')
 
 
