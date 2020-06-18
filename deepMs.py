@@ -876,6 +876,7 @@ if __name__ == '__main__':
                       help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
+    parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
     
 
     (_options, _args) = parser.parse_args()

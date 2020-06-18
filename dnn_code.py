@@ -210,7 +210,7 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
         optimizer = optim.SGD(model.parameters(), lr=hparams['dnn_lr'], momentum=0.9, weight_decay=hparams['l2_reg_const'])
     else:
         raise ValueError('optimizer {} not supported'.format(hparams['dnn_optimizer']))
-    
+
 #    val_metric = q_val_AUC(qTol=hparams['dnn_train_qtol'])
     val_metric = mini_utils.AUC_up_to_tol_singleQ(qTol=hparams['dnn_train_qtol'])
     

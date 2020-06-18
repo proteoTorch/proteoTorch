@@ -221,7 +221,9 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
                     (0.8, 0.6, 0.7),
                     (0.0, 0.6, 0.5),
                     (0.9, 0.6, 0.0),
-                    (0.95, 0.9, 0.25)]
+                    (0.95, 0.9, 0.25), 
+                    (0.35, 0.7, 0.9),
+                    (0.43, 0.17, 0.60)]
     xlabel = 'q-value'
     ylabel = 'Spectra identified'
     pylab.clf()
