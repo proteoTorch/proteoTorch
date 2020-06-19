@@ -214,7 +214,7 @@ def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCur
 
 
 def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
-    linestyle = [ '-', '-', '-', '-', '-', '-', '-', '-' ]
+    linestyle = [ '-', '-', '-', '-', '-', '-', '-', '-', '-' ]
     linecolors = [  (0.0, 0.0, 0.0),
                     (0.8, 0.4, 0.0),
                     (0.0, 0.45, 0.70),
