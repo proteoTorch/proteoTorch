@@ -10,7 +10,7 @@ import numpy as np
 from os import makedirs as _makedirs
 from os.path import exists as _exists
 
-from deepMs import calcQAndNumIdentified
+from deepMs import calcQAndNumIdentified, numIdentifiedAtQ
 #####################
 ### Generic Functions
 #####################
@@ -99,11 +99,23 @@ def calcQCompetition_v2(predictions, labels):
     # qs.reverse()
     return np.asarray(qs, 'float32'), np.asarray(ps, 'float32')
 
+def numIdentifiedAtQ_v2(predictions, labels, thresh = 0.002):
+    """Calculates P vs q xy points from arrays"""
+    if labels.ndim==2:
+        labels = np.argmax(labels, axis=1)
+    if predictions.ndim==2:
+        predictions = predictions[:,1] #softmax() already applied #[:, 1] - predictions[:, 0]
+
+    ps = numIdentifiedAtQ(predictions, labels)
+    return np.asarray(ps, 'float32'), len(labels)
+
 
 def AccuracyAtTol(predictions, labels, qTol=0.01):
-    qs, ps = calcQCompetition_v2(predictions, labels)
-    idx = binary_search(qs, qTol)
-    return float(ps[idx]) / float(len(qs)) * 100
+    ps, numPsms = numIdentifiedAtQ_v2(predictions, labels, qTol)
+    return ps[-1] / float(numPsms) * 100
+    # qs, ps = calcQCompetition_v2(predictions, labels)
+    # idx = binary_search(qs, qTol)
+    # return float(ps[idx]) / float(len(qs)) * 100
 
 
 def AUC_up_to_tol(predictions, labels, qTol=0.005, qCurveCheck = 0.001):
@@ -140,12 +152,17 @@ def AUC_up_to_tol_singleQ(qTol=0.002):
     def fn(predictions, labels):
         if labels.ndim==2:
             labels = np.argmax(labels, axis=1)
-        qs, ps = calcQCompetition_v2(predictions, labels)
-        idx1 = binary_search(qs, qTol)
+        # qs, ps = calcQCompetition_v2(predictions, labels)
+
+        ps, _ = numIdentifiedAtQ_v2(predictions, labels, qTol)
+        auc = np.trapz(ps)#/den/idx1
+        # idx1 = binary_search(qs, qTol)
     #    idx2 = binary_search(qs, qCurveCheck)
 #        den = float(np.sum(labels>=1))
         #print('AUC_upto_Tol: den =',den)
-        auc = np.trapz(ps[:idx1])#/den/idx1
+
+        # auc = np.trapz(ps[:idx1])#/den/idx1
+
     #    if qTol > qCurveCheck:
     #        auc = 0.3 * auc + 0.7 * np.trapz(ps[:idx2])/den/idx2
         return auc

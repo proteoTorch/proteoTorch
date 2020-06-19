@@ -277,3 +277,41 @@ def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = Fal
         ps.append(posTot)
     free(allScores)
     return qvals, ps
+
+def numIdentifiedAtQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False, verb = -1):
+    """Returns q-values and the number of identified spectra at each q-value
+    """
+    assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
+    cdef int numPsms
+    numPsms = len(scores)
+    # # allScores: list of triples consisting of score, label, and index
+    # allScores = zip(scores,labels, range(len(scores)))
+    # #--- sort descending
+    # allScores.sort(reverse=True)
+    # pi0 = 1.
+    # qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
+    cdef psm *allScores  = <psm *> malloc(numPsms * sizeof(psm))
+    cdef unsigned int idx
+    for idx in range(numPsms):
+        allScores[idx].score = scores[idx]
+        allScores[idx].label = labels[idx]
+        allScores[idx].index = idx
+    # psmsort(allScores, numPsms)
+    qsort(allScores, numPsms, sizeof(psm), compare)
+    cdef double pi0 = 1.
+    qvals = getQValues(pi0, allScores, numPsms,
+                       skipDecoysPlusOne, verb)
+    
+    posTot = 0
+    ps = []
+    for idx in range(numPsms):
+        q = qvals[idx]
+        if q > thresh:
+            break
+        curr_label = allScores[idx].label
+        curr_og_idx = allScores[idx].index
+        if curr_label == 1:
+            posTot += 1
+        ps.append(posTot)
+    free(allScores)
+    return ps

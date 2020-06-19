@@ -207,3 +207,26 @@ def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = Fal
             posTot += 1
         ps.append(posTot)
     return qvals, ps
+
+def numIdentifiedAtQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
+    """Returns q-values and the number of identified spectra at each q-value
+    """
+    assert len(scores)==len(labels), "Number of input scores does not match number of labels for q-value calculation"
+    # allScores: list of triples consisting of score, label, and index
+    allScores = list(zip(scores,labels, range(len(scores))))
+    #--- sort descending
+    allScores = sorted(allScores, key=lambda x: -x[0])
+    pi0 = 1.
+    qvals = getQValues(pi0, allScores, skipDecoysPlusOne)
+    
+    posTot = 0
+    ps = []
+    for idx, q in enumerate(qvals):
+        if q > thresh:
+            break
+        curr_label = allScores[idx][1]
+        #curr_og_idx = allScores[idx][2]
+        if curr_label == 1:
+            posTot += 1
+        ps.append(posTot)
+    return ps
