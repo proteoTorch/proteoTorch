@@ -705,13 +705,12 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
 ################### Calculate test scores
 #########################################################
 #########################################################
-def doTest(thresh, keys, X, Y, ws, svmlin = False):
+def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
 #    m = len(keys)/3
     testScores = np.zeros(Y.shape)
     totalTaq = 0
-    kFold = 0
-    for testSids in keys:
-        w = ws[kFold]
+    for kFold, testSids in enumerate(keys):
+        w = trained_models[kFold]
         if svmlin:
             testScores[testSids] = np.dot(X[testSids], w[:-1]) + w[-1]
         else:
@@ -719,7 +718,6 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
         # Calculate true positives
         tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
         totalTaq += len(tp)
-        kFold += 1
     return testScores, totalTaq
 
 
@@ -728,30 +726,32 @@ def doTest(thresh, keys, X, Y, ws, svmlin = False):
 ################### Main training functions
 #########################################################
 #########################################################
-def doIter(thresh, keys, scores, X, Y,
-           targetDecoyRatio, method = 0, currIter=1, dnn_hyperparams={}):
+def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1, dnn_hyperparams={}, prev_iter_models=[]):
     """ Train a classifier on CV bins.
         Method 0: LDA
         Method 1: linear SVM, solver TRON
         Method 2: linear SVM, solver SVMLIN
         Method 3: DNN (MLP)
+        
+        DNN will warm-start training the models the different folds between iterations.
     """
     #totalTaq = 0 # total number of estimated true positives at q-value threshold
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []
     clfs = [] # classifiers
-    kFold = 0
     # C for positive and negative classes
     cposes = [10., 1., 0.1]
     cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
     estTaq = 0
     tron = False
     alpha = 1.
+    if prev_iter_models is None or len(prev_iter_models) < len(keys):
+        prev_iter_models = [None] * len(keys)
     if method==1:
         tron = True
         alpha = 0.5
-    for cvBinSids in keys:
+    for kFold, cvBinSids in enumerate(keys):
         validation_Sids = cvBinSids
         # Find training set using q-value analysis
         taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
@@ -771,11 +771,11 @@ def doIter(thresh, keys, scores, X, Y,
             topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
                                                           cposes, cfracs, alpha, tron, currIter)
         elif method == 3:
-            topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels, hparams=dnn_hyperparams)
+            topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
+                                                                 validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
         newScores.append(topScores)
         clfs.append(bestClf)
         estTaq += bestTaq
-        kFold += 1
     estTaq /= 2
     return newScores, estTaq, clfs
 
@@ -826,8 +826,10 @@ def mainIter(hyperparams):
     fp = 0 # current number of identifications
     fpo = 0 # number of identifications from previous iteration
     fpoo = 0 # number of identifications from previous, previous iteration
+    trained_models = []
     for i in range(hyperparams['maxIters']):
-        scores, fp, ws = doIter(q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, dnn_hyperparams=hyperparams)
+        scores, fp, trained_models = doIter(q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
+                                            dnn_hyperparams=hyperparams, prev_iter_models = trained_models)
         print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
             print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
@@ -835,7 +837,7 @@ def mainIter(hyperparams):
         fpoo = fpo
         fpo = fp
     isSvmlin = (hyperparams['method']==2)
-    testScores, numIdentified = doTest(q, testKeys, X, Y, ws, isSvmlin)
+    testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
     print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
     if _mergescore:
         scores = doMergeScores(q, testKeys, testScores, Y)

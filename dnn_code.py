@@ -162,6 +162,12 @@ class ModelWrapper_like_sklearn(object):
         self._device = device
         self._batchsize = batchsize
     
+    def get_single_model(self):
+        '''
+        returns model
+        '''
+        return self._model
+    
     def decision_function(self, X):
         return torch_utils.run_model_on_data(X, self._model, self._device, self._batchsize)[:,1]
 
@@ -179,21 +185,34 @@ def convert_labels(binary_labels):
 
 
 
-def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Features, validation_Labels, hparams = {}):
+def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Features, validation_Labels, hparams = {}, model=None):
     """ 
     Train & test MLP model on one CV split
     
     hparams:
         
         dictionary with keys as found in _DEFAULT_HYPERPARAMS, or a subset of those keys: all missing keys will be mapped to the default values.
+    
+    model:
+        
+        Pass None to create a new model or pass a model to fine-tune it
     """
     tmp_hparams = _DEFAULT_HYPERPARAMS.copy()
     tmp_hparams.update(hparams)
     hparams = tmp_hparams.copy()
     DEVICE = torch.device("cuda:"+str(hparams['dnn_gpu_id']) if torch.cuda.is_available() else "cpu")
-    print('DNNSingleFold: working on device', DEVICE)
-    model = MLP_model(num_input_channels=len(train_features[0]), number_of_classes = 2, **hparams)
-    model = model.to(DEVICE)
+    
+    if model is None:
+        model = MLP_model(num_input_channels=len(train_features[0]), number_of_classes = 2, **hparams)
+        model = model.to(DEVICE)
+        print('DNNSingleFold: new model on device', DEVICE)
+    else:
+        for i in range(42):
+            if hasattr(model, 'get_single_model'): # is an ensemble model; extract one of them and train it
+                model = model.get_single_model()
+            else:
+                break
+        print('DNNSingleFold: fine-tuning given model on device', DEVICE)
     train_data = (np.asarray(train_features).astype('float32'), convert_labels(train_labels))
     valid_data = (np.asarray(validation_Features).astype('float32'), convert_labels(validation_Labels))
     

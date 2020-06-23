@@ -382,6 +382,13 @@ class Ensemble_Wrapper(object):
                 preds += self._model(X)
         return preds / len(self._weights_list)
     
+    def get_single_model(self):
+        '''
+        returns last model from given weights list (passed to init)
+        '''
+        set_model_params(self._model, self._weights_list[-1])
+        return self._model
+    
     def run_model_on_data(self, data, batchsize=50):
         '''
         Like __call__ but on large amounts of data.
