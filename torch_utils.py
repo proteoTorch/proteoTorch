@@ -230,7 +230,7 @@ def run_model_on_data(data, model, device, batchsize=50):
 
 
 def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_data,
-                validation_metric = accuracy, validation_check_interval=1, apply_softmax_to_predictions = True,
+                validation_metric = accuracy, validation_check_interval=1, #apply_softmax_to_predictions = True,
                 batchsize = 100, num_epochs = 100, train = True,
                  initial_lr=3e-3, total_lr_decay=0.2, verbose = 1,
                  use_early_stopping = True,
@@ -283,13 +283,7 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
 
         model, (train_acc, val_acc, test_acc), (train_loss_per_epoch, validation_loss_per_epoch)
     """
- 
     print('train_model(): train_data: {}, valid_data: {}, test_data: {}'.format(*list(len(x[0]) for x in [train_data, valid_data, test_data])))
-#    TT = g.TimerObj()
-    if apply_softmax_to_predictions:
-        cond_sm = lambda x: softmax(x)
-    else:
-        cond_sm = lambda x: x
     
     if train:
         train_loss_per_epoch, validation_loss_per_epoch = [], []
@@ -308,13 +302,11 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
         
         times=[]
         for epoch in range(num_epochs):
-#            TT.time('epoch start', show_average=0, b_print=0)
             if snapshot_ensemble_count > 0:
                 update_lr(optimizer, initial_lr, (epoch % lr_reset_every_n_epochs) * 1. / lr_reset_every_n_epochs, total_lr_decay)
             else:
                 update_lr(optimizer, initial_lr, epoch*1./num_epochs, total_lr_decay)
             train_data = permute_data_2(train_data)
-#            TT.time('permute data')
             losses=[]
             t0 = time.time()
             for i in range(0, len(train_data[0]), batchsize):
@@ -326,10 +318,9 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
                 optimizer.step()
                 #loss = model.train_on_batch(x=train_data[i], y=train_data[i]['labels'], check_batch_dim=False)
                 losses.append(torch_tensor_to_np(loss))
-#            TT.time('train epoch')
             times.append(time.time()-t0)
             if epoch % validation_check_interval == 0:
-                val_pred = cond_sm(run_model_on_data(valid_data[0], model, device, batchsize = 2 * batchsize))
+                val_pred = run_model_on_data(valid_data[0], model, device, batchsize = 2 * batchsize)
                 val_acc = validation_metric(val_pred, valid_data[1])
                 if np.isnan(val_acc):
                     print('ERROR: train_model():: validation_metric has returned NaN - aborting training!')
@@ -338,15 +329,19 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
                     best_valid_acc = val_acc
                     if use_early_stopping:
                         model_params_at_best_valid = get_model_params(model) #kept in RAM (not saved to disk as that is slower)
+                if verbose > 0:
+                    print('Epoch {}/{} completed with average loss {:6.4f}; validation {} = {:6.4f}'.format(epoch+1, num_epochs, np.mean(losses), validation_metric.__name__, val_acc))
             else:
                 val_acc = -1
+                if verbose > 0:
+                    print('Epoch {}/{} completed with average loss {:6.4f}'.format(epoch+1, num_epochs, np.mean(losses)))
+                
             if snapshot_ensemble_count > 0 and (epoch % lr_reset_every_n_epochs) == lr_reset_every_n_epochs - 1:
                 model_params_snapshots.append(get_model_params(model))
-            if verbose > 0:
-                print('Epoch {}/{} completed with average loss {:6.4f}; validation {} = {:6.4f}'.format(epoch+1, num_epochs, np.mean(losses), validation_metric.__name__, val_acc))
+#            if verbose > 0:
+#                print('Epoch {}/{} completed with average loss {:6.4f}; validation {} = {:6.4f}'.format(epoch+1, num_epochs, np.mean(losses), validation_metric.__name__, val_acc))
             train_loss_per_epoch.append(np.mean(losses))
             validation_loss_per_epoch.append(val_acc)
-            #TT.time('other epoch')
         # exclude times[0] as it includes compilation time!
         times.pop(0)
         print('Training @ {:5.3f} epochs/h, {:5.3f} samples/s)'.format(3600./np.mean(times), len(train_data[0])/np.mean(times)))
@@ -355,10 +350,9 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
         set_model_params(model, model_params_at_best_valid)
     if snapshot_ensemble_count > 0:
         model = make_ensemble(model, model_params_snapshots, valid_data, validation_metric, device, batchsize = 2 * batchsize)
-        cond_sm = lambda x:x
-    train_acc = validation_metric(cond_sm(run_model_on_data(train_data[0], model, device, batchsize = 2 * batchsize)), train_data[1])
-    val_acc = validation_metric(cond_sm(run_model_on_data(valid_data[0], model, device, batchsize = 2 * batchsize)), valid_data[1])
-    test_acc = validation_metric(cond_sm(run_model_on_data(test_data[0], model, device, batchsize = 2 * batchsize)), test_data[1])
+    train_acc = validation_metric(run_model_on_data(train_data[0], model, device, batchsize = 2 * batchsize), train_data[1])
+    val_acc = validation_metric(run_model_on_data(valid_data[0], model, device, batchsize = 2 * batchsize), valid_data[1])
+    test_acc = validation_metric(run_model_on_data(test_data[0], model, device, batchsize = 2 * batchsize), test_data[1])
     print('Training completed:')
     print('  Training set score = {:6.4f}'.format(train_acc))
     print('  Validation score = {:6.4f}'.format(val_acc))
@@ -368,7 +362,7 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
 
 
 class Ensemble_Wrapper(object):
-    def __init__(self, model, weights_list, device, apply_softmax=True):
+    def __init__(self, model, weights_list, device):
         '''
         Does NOT support training the model; only predictions via __call__().
         
@@ -377,7 +371,6 @@ class Ensemble_Wrapper(object):
         self._weights_list = weights_list
         self._model = model
         self._device = device
-        self._apply_softmax = apply_softmax
         
     def __call__(self, X):
         preds = None
@@ -387,10 +380,7 @@ class Ensemble_Wrapper(object):
                 preds = self._model(X)
             else:
                 preds += self._model(X)
-        if self._apply_softmax:
-            return softmax(preds / len(self._weights_list))
-        else:
-            return preds / len(self._weights_list)
+        return preds / len(self._weights_list)
     
     def run_model_on_data(self, data, batchsize=50):
         '''
@@ -406,10 +396,7 @@ class Ensemble_Wrapper(object):
             else:
                 preds += P
         self.train()
-        if self._apply_softmax:
-            return softmax(preds / len(self._weights_list))
-        else:
-            return preds / len(self._weights_list)
+        return preds / len(self._weights_list)
         
     def eval(self):
         self._model.eval()

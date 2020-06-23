@@ -145,7 +145,7 @@ class MLP_model(nn.Module):
         if self._use_sigmoid_outputs:
             return torch.sigmoid(x)
         else:
-            return x # if self.training==True else F.softmax(x, dim=1)
+            return x if self.training==True else F.softmax(x, dim=1)
 
     
 #def preprocess_data(X):

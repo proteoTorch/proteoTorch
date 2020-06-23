@@ -862,7 +862,7 @@ if __name__ == '__main__':
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 1, help='number of iterations; runs on multiple splits per iterations.') #4
     parser.add_option('--pin', type = 'string', action= 'store', help='input file with *.pin format')
-    parser.add_option('--output_dir', type = 'string', action= 'store', default=None) #'/extra/gurban0/DATA/PROTEOMICS/PSM_John_Halloran/data_april2020/model_output/'+mini_utils.TimeStamp()+'/')
+    parser.add_option('--output_dir', type = 'string', action= 'store', default=None, help='Defaults to model_output/<data_file_name>/<time_stamp>/')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
     
     parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
