@@ -34,12 +34,15 @@ from deepMs import (calcQAndNumIdentified, givenPsmIds_writePin, load_pin_return
 from scipy.spatial import distance
  #, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
 
-def calcDistanceMat(testMat,trainMat):
-    l0 = (testMat.shape)[0]
-    l1 = (trainMat.shape)[0]
-    z = np.empty([l0,l1])
-    for i,x in enumerate(testMat):
-        z[i] = np.linalg.norm(x-trainMat, axis=1)
+def calcDistanceMat(testMat,trainMat, metric = 'euclidean'):
+    """ Distance/similarity metrics: ‘braycurtis’, ‘canberra’, ‘chebyshev’, ‘cityblock’, ‘correlation’, ‘cosine’, ‘dice’, ‘euclidean’, ‘hamming’, ‘jaccard’, ‘jensenshannon’, ‘kulsinski’, ‘mahalanobis’, ‘matching’, ‘minkowski’, ‘rogerstanimoto’, ‘russellrao’, ‘seuclidean’, ‘sokalmichener’, ‘sokalsneath’, ‘sqeuclidean’, ‘wminkowski’, ‘yule’.
+    """
+    z = distance.cdist(testMat, trainMat, metric)
+    # l0 = (testMat.shape)[0]
+    # l1 = (trainMat.shape)[0]
+    # z = np.empty([l0,l1])
+    # for i,x in enumerate(testMat):
+    #     z[i] = np.linalg.norm(x-trainMat, axis=1)
     return z
 
 def doRand():
@@ -116,30 +119,27 @@ def disagreedPsms_computeSimilarity(pin, disagreedPsmsFile, seed = 1):
             for j, tkSet in enumerate(testIndSets):
                 if i in tkSet:
                     submatrixTestIndices[j].append(i)
-    # form submatrix, A, of testing PSMs
-    # testSubmatrices = []
-    # for s in submatrixTestIndices:
-    #     testSubmatrices.append(X[s])
-    
-    # gather matrix, B, of training PSMs
     for kFold, (s,cvBinSids) in enumerate(zip(submatrixTestIndices,trainKeys)):
+        # form submatrix, A, of testing PSMs
+        # gather matrix, B, of training PSMs
         print("Fold %d: %s test instances, %d train instances" % (kFold, len(s), len(cvBinSids)))
         taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
         gd = getDecoyIdx(Y, cvBinSids)
         trainSids = gd + taq
-    # calculate similarity between A,B
-        z = calcDistanceMat(X[s],X[trainSids])
-        similarityPlot(z,kFold)
+        # calculate similarity between A,B
+        metric = 'euclidean'
+        z = calcDistanceMat(X[s],X[trainSids], metric)
+        similarityPlot(z,kFold, 'L2')
 
-def similarityPlot(z, fold, distMat=False, bins = 500, prob = False):
+def similarityPlot(z, fold, distMat=False, base = 'L2', bins = 500, prob = False):
     if distMat:
-        output = 'fold' + str(fold) + '_distanceMatrix.pdf'
+        output = 'fold' + str(fold) + '_' + base + 'DistanceMatrix.pdf'
         matplotlib.pyplot.matshow(z)
         matplotlib.pyplot.show()
         matplotlib.pyplot.savefig(output)
         matplotlib.pyplot.close()
     else:
-        output = 'fold' + str(fold) + '_distanceMatrixHist.pdf'
+        output = 'fold' + str(fold) + '_' + base + 'DistanceMatrixHist.pdf'
         pylab.clf()
         pylab.xlabel('L2 distance')
         pylab.ylabel('Frequency')
