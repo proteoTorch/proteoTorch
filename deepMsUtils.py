@@ -119,6 +119,7 @@ def disagreedPsms_computeSimilarity(pin, disagreedPsmsFile, seed = 1):
             for j, tkSet in enumerate(testIndSets):
                 if i in tkSet:
                     submatrixTestIndices[j].append(i)
+    metrics = ['euclidean', 'cosine', 'correlation', 'jaccard']
     for kFold, (s,cvBinSids) in enumerate(zip(submatrixTestIndices,trainKeys)):
         # form submatrix, A, of testing PSMs
         # gather matrix, B, of training PSMs
@@ -127,9 +128,13 @@ def disagreedPsms_computeSimilarity(pin, disagreedPsmsFile, seed = 1):
         gd = getDecoyIdx(Y, cvBinSids)
         trainSids = gd + taq
         # calculate similarity between A,B
-        metric = 'euclidean'
-        z = calcDistanceMat(X[s],X[trainSids], metric)
-        similarityPlot(z,kFold, 'L2')
+        # metric = 'euclidean'
+        # z = calcDistanceMat(X[s],X[trainSids], metric)
+        # similarityPlot(z,kFold, 'L2')
+        for m in metrics:
+            print(m)
+            z = calcDistanceMat(X[s],X[trainSids], m)
+            similarityPlot(z,kFold, False, m)
 
 def similarityPlot(z, fold, distMat=False, base = 'L2', bins = 500, prob = False):
     if distMat:
@@ -141,10 +146,10 @@ def similarityPlot(z, fold, distMat=False, base = 'L2', bins = 500, prob = False
     else:
         output = 'fold' + str(fold) + '_' + base + 'DistanceMatrixHist.pdf'
         pylab.clf()
-        pylab.xlabel('L2 distance')
+        pylab.xlabel(base)
         pylab.ylabel('Frequency')
         if prob:
-            pylab.ylabel('Pr(L2 distance)')
+            pylab.ylabel('Pr(' + base +  ')')
         
         _, _, h1 = pylab.hist(z.flatten(), bins = bins)
         pylab.savefig('%s' % output)
