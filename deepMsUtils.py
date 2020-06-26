@@ -28,8 +28,128 @@ except ImportError:
 import itertools
 import numpy
 
-from deepMs import calcQAndNumIdentified, givenPsmIds_writePin, load_pin_return_featureMatrix
+from deepMs import (calcQAndNumIdentified, givenPsmIds_writePin, load_pin_return_featureMatrix, 
+                    calculateTargetDecoyRatio, searchForInitialDirection_split,
+                    calcQ, getDecoyIdx, sortRowIndicesBySid)
+from scipy.spatial import distance
  #, _scoreInd, _labelInd, _indInd, _includeNegativesInResult
+
+def calcDistanceMat(testMat,trainMat):
+    l0 = (testMat.shape)[0]
+    l1 = (trainMat.shape)[0]
+    z = np.empty([l0,l1])
+    for i,x in enumerate(testMat):
+        z[i] = np.linalg.norm(x-trainMat, axis=1)
+    return z
+
+def doRand():
+    global _seed
+    _seed=(_seed * 279470273) % 4294967291
+    return _seed
+
+def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
+    trainKeys = []
+    testKeys = []
+    for i in range(folds):
+        trainKeys.append([])
+        testKeys.append([])
+    remain = []
+    r = len(sids) / folds
+    remain.append(len(sids) - (folds-1) * r)
+    for i in range(folds-1):
+        remain.append(len(sids) / folds)
+    prevSid = sids[0]
+    # seed = doRand(seed)
+    randIdx = doRand() % folds
+    it = 0
+    for k,sid in list(zip(featureMatRowIndices, sids)):
+        if (sid!=prevSid):
+            # seed = doRand(seed)
+            randIdx = doRand() % folds
+            while remain[randIdx] <= 0:
+                # seed = doRand(seed)
+                randIdx = doRand() % folds
+        for i in range(folds):
+            if i==randIdx:
+                testKeys[i].append(k)
+            else:
+                trainKeys[i].append(k)
+
+        remain[randIdx] -= 1
+        prevSid = sid
+        it += 1
+    return trainKeys, testKeys
+
+def disagreedPsms_computeSimilarity(pin, disagreedPsmsFile, seed = 1):
+    global _seed 
+    _seed = seed
+    q=0.01
+    thresh=q
+    pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(pin)
+    # PSMId is first entry of each tuple in pepstrings
+    sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
+    l = X.shape
+    m = l[1] # number of features
+    targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
+    print("Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio))
+    trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
+    initTaq = 0.
+    scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames)
+
+    # load disagreed PSMs
+    psmIds = []
+    with open(disagreedPsmsFile, 'r') as f:
+        try:
+            psmIds = set([l["PSMId"] for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)])
+        except ValueError:
+            print("Error: no PSMId field in disagreed PSM file %s, exitting" % (disagreedPsmsFile))
+            exit(-1)
+
+    # sets of test set indices
+    testIndSets = [set(tk) for tk in testKeys]
+    
+    submatrixTestIndices = [[]]*len(testKeys)
+    # find testing bins for each disagreed PSM
+    psmIdDict = {}
+    for i, p in enumerate(pepstrings):
+        if p[0] in psmIds:
+            for j, tkSet in enumerate(testIndSets):
+                if i in tkSet:
+                    submatrixTestIndices[j].append(i)
+    # form submatrix, A, of testing PSMs
+    # testSubmatrices = []
+    # for s in submatrixTestIndices:
+    #     testSubmatrices.append(X[s])
+    
+    # gather matrix, B, of training PSMs
+    for kFold, (s,cvBinSids) in enumerate(zip(submatrixTestIndices,trainKeys)):
+        print("Fold %d: %s test instances, %d train instances" % (kFold, len(s), len(cvBinSids)))
+        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
+        gd = getDecoyIdx(Y, cvBinSids)
+        trainSids = gd + taq
+    # calculate similarity between A,B
+        z = calcDistanceMat(X[s],X[trainSids])
+        similarityPlot(z,kFold)
+
+def similarityPlot(z, fold, distMat=False, bins = 500, prob = False):
+    if distMat:
+        output = 'fold' + str(fold) + '_distanceMatrix.pdf'
+        matplotlib.pyplot.matshow(z)
+        matplotlib.pyplot.show()
+        matplotlib.pyplot.savefig(output)
+        matplotlib.pyplot.close()
+    else:
+        output = 'fold' + str(fold) + '_distanceMatrixHist.pdf'
+        pylab.clf()
+        pylab.xlabel('L2 distance')
+        pylab.ylabel('Frequency')
+        if prob:
+            pylab.ylabel('Pr(L2 distance)')
+        
+        _, _, h1 = pylab.hist(z.flatten(), bins = bins)
+        pylab.savefig('%s' % output)
+
+
 
 def load_percolator_output(filename, scoreKey = "score", maxPerSid = False, idKey = "PSMId"):
     """ filename - percolator tab delimited output file
