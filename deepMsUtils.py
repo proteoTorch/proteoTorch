@@ -107,18 +107,21 @@ def disagreedPsms_computeSimilarity(pin, disagreedPsmsFile, seed = 1):
         except ValueError:
             print("Error: no PSMId field in disagreed PSM file %s, exitting" % (disagreedPsmsFile))
             exit(-1)
-
+    print("Loaded %d PSMIds" % (len(psmIds)))
     # sets of test set indices
     testIndSets = [set(tk) for tk in testKeys]
     
-    submatrixTestIndices = [[]]*len(testKeys)
+    submatrixTestIndices = []
+    for i in range(len(testKeys)):
+        submatrixTestIndices.append([])
     # find testing bins for each disagreed PSM
     psmIdDict = {}
     for i, p in enumerate(pepstrings):
-        if p[0] in psmIds:
-            for j, tkSet in enumerate(testIndSets):
-                if i in tkSet:
-                    submatrixTestIndices[j].append(i)
+        if p[0] not in psmIds:
+            continue
+        for j, tkSet in enumerate(testIndSets):
+            if i in tkSet:
+                submatrixTestIndices[j].append(i)
     metrics = ['euclidean', 'cosine', 'correlation', 'jaccard']
     for kFold, (s,cvBinSids) in enumerate(zip(submatrixTestIndices,trainKeys)):
         # form submatrix, A, of testing PSMs
@@ -128,13 +131,17 @@ def disagreedPsms_computeSimilarity(pin, disagreedPsmsFile, seed = 1):
         gd = getDecoyIdx(Y, cvBinSids)
         trainSids = gd + taq
         # calculate similarity between A,B
-        # metric = 'euclidean'
-        # z = calcDistanceMat(X[s],X[trainSids], metric)
-        # similarityPlot(z,kFold, 'L2')
-        for m in metrics:
-            print(m)
-            z = calcDistanceMat(X[s],X[trainSids], m)
-            similarityPlot(z,kFold, False, m)
+        z = calcDistanceMat(X[s],X[trainSids], 'euclidean')
+        excludePsms = 'kim_excludeHighlyCorreleatedPsmsList.txt'
+        with open(excludePsms, 'w') as f:
+            for ind, zrow in enumerate(z.T):
+                if sum(zrow > 10.):
+                    psmId = pepstrings[trainSids[ind]]
+                    f.write("%s" % (psmId))
+        # for m in metrics:
+        #     print(m)
+        #     z = calcDistanceMat(X[s],X[trainSids], m)
+        #     similarityPlot(z,kFold, False, m)
 
 def similarityPlot(z, fold, distMat=False, base = 'L2', bins = 500, prob = False):
     if distMat:
