@@ -112,6 +112,10 @@ class label_smoothing_loss(nn.Module):
         if self._false_positive_loss_factor != 1:
             idx = ((torch_utils.torch_tensor_to_np(labels) == 0) * (torch_utils.torch_tensor_to_np(softm_pred)[:, 1] >= -0.693147180559)).astype(np.bool)
             weights[idx] *=  self._false_positive_loss_factor
+            # loss_adjustment_others is to keep the overall loss at a ~fixed average so that the LR does not neet to be adjusted
+            n = np.sum(idx)
+            loss_adjustment_others = (len(weights) - n * self._false_positive_loss_factor) / (len(weights) - n)
+            weights[idx==0] *= loss_adjustment_others
 #        if 0:
 #            #un-weighted loss'
 #            return (tmp).sum() / len(labels)
