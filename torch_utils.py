@@ -15,7 +15,9 @@ import torch.optim as optim
 
 
 def torch_tensor_to_np(tensor):
-    return tensor.data.cpu().numpy()
+    if not isinstance(tensor, np.ndarray):
+        return tensor.data.cpu().numpy()
+    return tensor
 
 
 def softmax(x):

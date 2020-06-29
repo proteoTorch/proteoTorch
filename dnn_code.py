@@ -21,11 +21,12 @@ import deepMs
 
 from deepMs import calcQAndNumIdentified
 
-_DEFAULT_HYPERPARAMS = {'dnn_optimizer': 'adam', 'batchsize': 2500, 'dnn_num_epochs': 500, 
+_DEFAULT_HYPERPARAMS = {'dnn_optimizer': 'adam', 'batchsize': 5000, 'dnn_num_epochs': 2000, 
                         'dnn_lr': 0.001, 'l2_reg_const':0,
-                        'dnn_num_layers':3, 'dnn_layer_size':264, 'dnn_dropout_rate':0.2,
+                        'dnn_num_layers':3, 'dnn_layer_size':264, 'dnn_dropout_rate':0.3,
                         'dnn_lr_decay':0.2, 'dnn_gpu_id':0, 'snapshot_ensemble_count':10,
-                        'dnn_label_smoothing_0':1, 'dnn_label_smoothing_1':1, 'dnn_train_qtol':0.002}
+                        'dnn_label_smoothing_0':1, 'dnn_label_smoothing_1':1, 'dnn_train_qtol':0.002,
+                        'false_positive_loss_factor':1.5}
 
 
 def q_val_AUC(qTol=0.003):
@@ -57,7 +58,7 @@ def q_val_AUC(qTol=0.003):
 
 
 class label_smoothing_loss(nn.Module):
-    def __init__(self, device, class_confidence_values=[1, 1], class_weights = [1, 1]):
+    def __init__(self, device, class_confidence_values=[1, 1], class_weights = [1, 1], false_positive_loss_factor = 1.5):
         """
         KL-divergence with label smoothing.
         
@@ -71,6 +72,10 @@ class label_smoothing_loss(nn.Module):
         class_weights:
             
             applied on a per-sample basis to weight specific classes up or down.
+        
+        false_positive_loss_factor:
+            
+            will adjust loss for false positive predictions by this factor. Set to 1 to disable this component; above 1 to penalize FP more, lower than 1 to penalize them less.
             
         """
         class_confidence_values = np.asarray(class_confidence_values, 'float32')
@@ -78,11 +83,13 @@ class label_smoothing_loss(nn.Module):
         assert len(class_confidence_values) > 1
         assert len(class_weights) == len(class_confidence_values)
         assert np.all(0 <= class_confidence_values) and np.all( class_confidence_values <= 1)
+        assert false_positive_loss_factor > 0
         
         super(label_smoothing_loss, self).__init__()
         self.device = device
         self.amount = class_confidence_values
         self.num_classes = len(class_confidence_values)
+        self._false_positive_loss_factor = false_positive_loss_factor
         
         self.soft_distribs = np.zeros((self.num_classes, self.num_classes), 'float32')
         self.class_weights = np.asarray(class_weights, 'float32')
@@ -97,18 +104,21 @@ class label_smoothing_loss(nn.Module):
         labels (long) shape: (batch_size,)
         """
         labels = torch_utils.torch_tensor_to_np(labels)
-        tmp2 = torch_utils.numpy_to_pytorch_tensor(self.class_weights[labels], device=self.device)
+        weights = self.class_weights[labels]
         soft_labels = np.zeros((len(labels), self.num_classes), 'float32')
-        soft_labels[np.arange(len(labels)), :] = self.soft_distribs[labels]        
-        tmp = F.kl_div(F.log_softmax(output, 1), torch_utils.numpy_to_pytorch_tensor(soft_labels, device=self.device), reduction='none').mean(1) #'batchmean')
+        soft_labels[np.arange(len(labels)), :] = self.soft_distribs[labels]
+        softm_pred = F.log_softmax(output, 1)
+        KL_loss = F.kl_div(softm_pred, torch_utils.numpy_to_pytorch_tensor(soft_labels, device=self.device), reduction='none').mean(1) #'batchmean')
+        if self._false_positive_loss_factor != 1:
+            idx = ((torch_utils.torch_tensor_to_np(labels) == 0) * (torch_utils.torch_tensor_to_np(softm_pred)[:, 1] >= -0.693147180559)).astype(np.bool)
+            weights[idx] *=  self._false_positive_loss_factor
 #        if 0:
 #            #un-weighted loss'
 #            return (tmp).sum() / len(labels)
 #        else:
-        return (tmp2 * tmp).sum() / len(labels)
+        return (torch_utils.numpy_to_pytorch_tensor(weights, device=self.device) * KL_loss).sum() / len(labels)
 
-#TEST_X = label_smoothing_loss([0.95, 0.85])
-#TEST_X.forward(0, [0,1,1,0,0,0,1]) 
+
 
 
 class MLP_model(nn.Module):
@@ -243,7 +253,8 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     print('class_weights', class_weights)
     #loss_fn = nn.CrossEntropyLoss(),
     model, (train_acc, val_acc, test_acc), (train_loss_per_epoch, validation_loss_per_epoch) = torch_utils.train_model(
-            model, DEVICE, loss_fn = label_smoothing_loss(DEVICE, [hparams['dnn_label_smoothing_0'], hparams['dnn_label_smoothing_1']], class_weights=class_weights), 
+            model, DEVICE, loss_fn = label_smoothing_loss(DEVICE, [hparams['dnn_label_smoothing_0'], hparams['dnn_label_smoothing_1']], 
+                                                          class_weights=class_weights, false_positive_loss_factor=hparams['false_positive_loss_factor']), 
             optimizer=optimizer, train_data=train_data, 
             valid_data=valid_data, test_data=valid_data, 
             batchsize=hparams['batchsize'], num_epochs=hparams['dnn_num_epochs'], train=True, initial_lr=hparams['dnn_lr'], 
@@ -258,3 +269,16 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     tp, _, _ = deepMs.calcQ(test_pred, validation_Labels, thresh, skipDecoysPlusOne=True)
     print("DNN CV finished for fold %d: %d targets identified" % (kFold, len(tp)))
     return test_pred, len(tp), ModelWrapper_like_sklearn(model, DEVICE)
+
+
+if __name__=='__main__':
+    TEST_X = label_smoothing_loss(torch.device("cpu"), [1,1], false_positive_loss_factor=2)
+    print('The third loss is a false positive. It is upweighted by 2x here')
+    print(TEST_X.forward(torch_utils.numpy_to_pytorch_tensor(np.asarray([[15,0], [15,0]], np.float32)), torch_utils.numpy_to_pytorch_tensor(np.asarray([0,0], np.int32))))
+    print(TEST_X.forward(torch_utils.numpy_to_pytorch_tensor(np.asarray([[15,0], [15,0]], np.float32)), torch_utils.numpy_to_pytorch_tensor(np.asarray([1,1], np.int32))))
+    print(TEST_X.forward(torch_utils.numpy_to_pytorch_tensor(np.asarray([[0,15], [0,15]], np.float32)), torch_utils.numpy_to_pytorch_tensor(np.asarray([0,0], np.int32))))
+    print(TEST_X.forward(torch_utils.numpy_to_pytorch_tensor(np.asarray([[0,15], [0,15]], np.float32)), torch_utils.numpy_to_pytorch_tensor(np.asarray([1,1], np.int32))))
+    
+    
+    
+    

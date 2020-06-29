@@ -22,9 +22,9 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from svmlin import svmlin
 
 try:
-    from qvalues import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
+    from qvalues import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified # load cython library
 except:
-    from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
+    from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified # import unoptimized q-value calculation
 
 import dnn_code
 import mini_utils
@@ -721,6 +721,9 @@ def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
     return testScores, totalTaq
 
 
+AUC_fn_001 = mini_utils.AUC_up_to_tol_singleQ(0.01)
+
+
 #########################################################
 #########################################################
 ################### Main training functions
@@ -740,6 +743,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     # newScores = np.zeros(scores.shape)
     newScores = []
     clfs = [] # classifiers
+    all_AUCs = []
     # C for positive and negative classes
     cposes = [10., 1., 0.1]
     cfracs = [targetDecoyRatio, 3. * targetDecoyRatio, 10. * targetDecoyRatio]
@@ -751,6 +755,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     if method==1:
         tron = True
         alpha = 0.5
+    
     for kFold, cvBinSids in enumerate(keys):
         validation_Sids = cvBinSids
         # Find training set using q-value analysis
@@ -765,6 +770,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         labels = Y[trainSids]
         validation_Features = X[validation_Sids]
         validation_Labels = Y[validation_Sids]
+        
         if method == 0:
             topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
         elif method in [1, 2]:
@@ -773,11 +779,12 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         elif method == 3:
             topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
                                                                  validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
+        all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
         newScores.append(topScores)
         clfs.append(bestClf)
         estTaq += bestTaq
     estTaq /= 2
-    return newScores, estTaq, clfs
+    return newScores, estTaq, clfs, np.mean(all_AUCs)
 
 
 def mainIter(hyperparams):
@@ -828,8 +835,9 @@ def mainIter(hyperparams):
     fpoo = 0 # number of identifications from previous, previous iteration
     trained_models = []
     for i in range(hyperparams['maxIters']):
-        scores, fp, trained_models = doIter(q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
-                                            dnn_hyperparams=hyperparams, prev_iter_models = trained_models)
+        validation_predictions, fp, trained_models, validation_AUC = doIter(
+                q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
+                dnn_hyperparams=hyperparams, prev_iter_models = trained_models)
         print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
             print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
@@ -848,7 +856,7 @@ def mainIter(hyperparams):
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
     else:
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, sids0)
-    return None, len(taq), len(taq), output_dir
+    return None, validation_AUC, AUC_fn_001(testScores, Y), output_dir
 
 
 
@@ -879,7 +887,6 @@ if __name__ == '__main__':
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
-    parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
     
 
     (_options, _args) = parser.parse_args()
