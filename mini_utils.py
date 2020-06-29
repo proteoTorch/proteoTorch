@@ -10,7 +10,11 @@ import numpy as np
 from os import makedirs as _makedirs
 from os.path import exists as _exists
 
-from deepMs import calcQAndNumIdentified, numIdentifiedAtQ
+
+try:
+   from qvalues import calcQAndNumIdentified, numIdentifiedAtQ
+except:
+   from pyfiles.qvalsBase import calcQAndNumIdentified, numIdentifiedAtQ
 #####################
 ### Generic Functions
 #####################

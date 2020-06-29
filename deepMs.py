@@ -22,12 +22,15 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from svmlin import svmlin
 
 try:
-    from qvalues import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified # load cython library
+    from qvalues import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
 except:
-    from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified # import unoptimized q-value calculation
+    from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
 
 import dnn_code
 import mini_utils
+
+
+AUC_fn_001 = mini_utils.AUC_up_to_tol_singleQ(0.01)
 
 #########################################################
 #########################################################
@@ -721,7 +724,7 @@ def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
     return testScores, totalTaq
 
 
-AUC_fn_001 = mini_utils.AUC_up_to_tol_singleQ(0.01)
+
 
 
 #########################################################
