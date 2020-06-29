@@ -890,8 +890,8 @@ if __name__ == '__main__':
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
-    
-
+    parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
+    parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 1.5, help='Multiplicative factor to weight false positives')
     (_options, _args) = parser.parse_args()
 
     # Seed random number generator.  To make shuffling nondeterministic, input seed <= -1
