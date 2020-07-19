@@ -760,15 +760,15 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         alpha = 0.5
     
     for kFold, cvBinSids in enumerate(keys):
-        validation_Sids = cvBinSids
         # Find training set using q-value analysis
         taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
+        td = [cvBinSids[i] for i in taq]
         gd = getDecoyIdx(Y, cvBinSids)
         # Debugging check
         if _debug and _verb >= 1:
             print("CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq)))
-        # trainSids = list(set(taq) | set(gd))
         trainSids = gd + taq
+        validation_Sids = cvBinSids
         features = X[trainSids]
         labels = Y[trainSids]
         validation_Features = X[validation_Sids]
@@ -782,6 +782,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         elif method == 3:
             topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
                                                                  validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
+                                                                 # validation_Labels, hparams=dnn_hyperparams, model = None)
         all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
         newScores.append(topScores)
         clfs.append(bestClf)
@@ -838,6 +839,41 @@ def mainIter(hyperparams):
     fpoo = 0 # number of identifications from previous, previous iteration
     trained_models = []
     for i in range(hyperparams['maxIters']):
+        # if i < 5:
+        #     q = hyperparams['q']
+        #     # hyperparams['q'] = 0.02
+        #     # hyperparams['dnn_train_qtol'] = 0.02
+        # else:
+        #     q = hyperparams['q2']
+        #     # hyperparams['q'] = 0.01
+        #     hyperparams['dnn_train_qtol'] = hyperparams['dnn_train_qtol2']
+        #     hyperparams['dnn_optimizer'] = hyperparams['dnn_optimizer2']
+        if i >= 5:
+            hyperparams['dnn_optimizer'] = hyperparams['dnn_optimizer2']
+
+        if i==2:
+            q = hyperparams['q2']
+            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs2']
+            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate2']
+        elif i==3:
+            q = hyperparams['q3']
+            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs3']
+            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate3']
+        elif i==4:
+            q = hyperparams['q4']
+            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs4']
+            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate4']
+        elif i==5:
+            q = hyperparams['q5']
+            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs5']
+            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate5']
+        elif i >= 6:
+            q = hyperparams['q6']
+            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs6']
+            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate6']
+
+        hyperparams['dnn_train_qtol'] = q
+
         validation_predictions, fp, trained_models, validation_AUC = doIter(
                 q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
                 dnn_hyperparams=hyperparams, prev_iter_models = trained_models)
@@ -868,6 +904,11 @@ if __name__ == '__main__':
 
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--q2', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--q3', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--q4', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--q5', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--q6', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
@@ -877,22 +918,33 @@ if __name__ == '__main__':
     parser.add_option('--pin', type = 'string', action= 'store', help='input file with *.pin format')
     parser.add_option('--output_dir', type = 'string', action= 'store', default=None, help='Defaults to model_output/<data_file_name>/<time_stamp>/')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
-    
     parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_num_epochs2', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_num_epochs3', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_num_epochs4', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_num_epochs5', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_num_epochs6', type = 'int', action= 'store', default = 2000, help='number of epochs for training the DNN model.')
     parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
     parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.02, 
                       help='learning rate reduced by this factor during training overall (a fraction of this is applied after each epoch).')
     parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
     parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.1, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--dnn_dropout_rate2', type = 'float', action= 'store', default = 0.1, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--dnn_dropout_rate3', type = 'float', action= 'store', default = 0.1, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--dnn_dropout_rate4', type = 'float', action= 'store', default = 0.1, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--dnn_dropout_rate5', type = 'float', action= 'store', default = 0.1, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--dnn_dropout_rate6', type = 'float', action= 'store', default = 0.1, help='dropout rate; must be 0 <= rate < 1.')
     parser.add_option('--dnn_gpu_id', type = 'int', action= 'store', default = 0, 
                       help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
+    parser.add_option('--dnn_train_qtol2', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
     parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
     parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 1.5, help='Multiplicative factor to weight false positives')
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'sgd', help='DNN solver to use.')
+    parser.add_option('--dnn_optimizer2', type = 'string', action= 'store', default= 'sgd', help='DNN solver to use.')
     (_options, _args) = parser.parse_args()
 
     # Seed random number generator.  To make shuffling nondeterministic, input seed <= -1
