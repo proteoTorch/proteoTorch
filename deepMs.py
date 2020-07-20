@@ -691,7 +691,7 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
             if _debug and _verb > 2:
                 print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
             if currentTaq > bestTaq:
-                topScores = validation_scores[:]
+                topScores = np.array(validation_scores[:])
                 bestTaq = currentTaq
                 bestCp = cpos * alpha
                 bestCn = cneg * alpha
@@ -782,7 +782,6 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         elif method == 3:
             topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
                                                                  validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
-                                                                 # validation_Labels, hparams=dnn_hyperparams, model = None)
         all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
         newScores.append(topScores)
         clfs.append(bestClf)
