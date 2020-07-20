@@ -848,35 +848,35 @@ def mainIter(hyperparams):
         #     # hyperparams['q'] = 0.01
         #     hyperparams['dnn_train_qtol'] = hyperparams['dnn_train_qtol2']
         #     hyperparams['dnn_optimizer'] = hyperparams['dnn_optimizer2']
-        if i >= 5:
-            hyperparams['dnn_optimizer'] = hyperparams['dnn_optimizer2']
+        # if i >= 5:
+        #     hyperparams['dnn_optimizer'] = hyperparams['dnn_optimizer2']
 
-        if i==2:
-            q = hyperparams['q2']
-            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs2']
-            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate2']
-        elif i==3:
-            q = hyperparams['q3']
-            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs3']
-            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate3']
-        elif i==4:
-            q = hyperparams['q4']
-            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs4']
-            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate4']
-        elif i==5:
-            q = hyperparams['q5']
-            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs5']
-            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate5']
-        elif i >= 6:
-            q = hyperparams['q6']
-            hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs6']
-            hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate6']
+        # if i==2:
+        #     q = hyperparams['q2']
+        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs2']
+        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate2']
+        # elif i==3:
+        #     q = hyperparams['q3']
+        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs3']
+        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate3']
+        # elif i==4:
+        #     q = hyperparams['q4']
+        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs4']
+        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate4']
+        # elif i==5:
+        #     q = hyperparams['q5']
+        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs5']
+        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate5']
+        # elif i >= 6:
+        #     q = hyperparams['q6']
+        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs6']
+        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate6']
 
-        hyperparams['dnn_train_qtol'] = q
+        # hyperparams['dnn_train_qtol'] = q
 
-        validation_predictions, fp, trained_models, validation_AUC = doIter(
-                q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
-                dnn_hyperparams=hyperparams, prev_iter_models = trained_models)
+        scores, fp, trained_models, validation_AUC = doIter(
+            q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
+            dnn_hyperparams=hyperparams, prev_iter_models = trained_models)
         print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
             print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
