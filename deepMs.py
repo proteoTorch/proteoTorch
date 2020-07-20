@@ -767,7 +767,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         # Debugging check
         if _debug and _verb >= 1:
             print("CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq)))
-        trainSids = gd + taq
+        trainSids = gd + td
         validation_Sids = cvBinSids
         features = X[trainSids]
         labels = Y[trainSids]
