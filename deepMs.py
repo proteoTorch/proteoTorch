@@ -22,8 +22,9 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from svmlin import svmlin
 
 try:
-    from qvalues import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
+    from qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
 except:
+    print("Cython q-value not found, loading strictly python q-value library")
     from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
 
 import dnn_code
