@@ -21,11 +21,12 @@ import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 from svmlin import svmlin
 
-try:
-    from qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
-except:
-    print("Cython q-value not found, loading strictly python q-value library")
-    from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
+from qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ, L2_SVM_MFN # load cython library
+# try:
+#     from qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
+# except:
+#     print("Cython q-value not found, loading strictly python q-value library")
+#     from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
 
 import dnn_code
 import mini_utils
@@ -685,7 +686,8 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
             else:
                 # clf = getPercWeights(currIter, kFold)
                 # clf = getPercKimWeights(currIter, kFold)
-                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                clf = L2_SVM_MFN(features, labels, alpha * cpos, alpha * cneg)
                 validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
             currentTaq = len(tp)

@@ -1,3 +1,4 @@
+# distutils: sources = cylibs/ssl.cpp
 # distutils: language=c++
 
 # Written by John Halloran <jthalloran@ucdavis.edu>
@@ -9,6 +10,7 @@
 from libcpp.vector cimport vector
 from libc.stdlib cimport malloc, free, qsort
 import operator
+import numpy as np
 
 _includeNegativesInResult=True
 _scoreInd=0
@@ -45,6 +47,45 @@ cdef int compare(const void * pa, const void * pb):
         return -1
     else:
         return 0
+
+cdef extern from "ssl.h":
+    void call_L2_SVM_MFN(double* X, double* Y, double* w,
+                         double cpos, double cneg,
+                         int n, int m, double lambda_l, int verbose)
+
+def L2_SVM_MFN(features, labels, cpos, cneg, verbose = 0):
+    l = features.shape
+    cdef double lambda_l = 1.
+    cdef unsigned int i
+    cdef int m = l[0] # num rows
+    cdef int n = l[1] # num columns
+    cdef int row = 0
+    cdef double *X  = <double *> malloc(m*(n+1)* sizeof(double)) # flattened array
+    cdef double *Y  = <double *> malloc(m * sizeof(double))
+    cdef double *w  = <double *> malloc(n+1 * sizeof(double))
+    print("Flattening features")
+    print(l)
+    idx = 0
+    for i in range(m):
+        Y[i] = labels[i]
+        for j in range(n):
+            X[idx] = features[i,j]
+            idx += 1
+        X[idx] = 1.
+        idx += 1
+    print("Done flattening, calling l2-svm-mfn")
+    call_L2_SVM_MFN(X, Y, w, cpos, cneg, n+1, m, lambda_l, verbose)
+    print("done")
+    wout = []
+    for i in range(n+1):
+        print("w[%d]=%f" % (i, w[i]))
+        wout.append(w[i])
+    print("done copying weights")
+    free(X)
+    free(Y)
+    free(w)
+    print("Exitting the function")
+    return np.ndarray(wout)
 
 #########################################################
 #########################################################
