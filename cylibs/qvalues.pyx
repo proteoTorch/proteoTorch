@@ -12,6 +12,7 @@ from libc.stdlib cimport malloc, free, qsort
 import operator
 import numpy as np
 
+# libssl = ctypes.CDLL(os.path.join(os.path.abspath(__file__), 'libssl.so'))
 _includeNegativesInResult=True
 _scoreInd=0
 _labelInd=1
@@ -19,22 +20,12 @@ _labelInd=1
 
 cdef extern from "stdlib.h":
     void qsort(void *base, int nmemb, int size,
-                int(*compar)(const void *, const void *)) nogil
+               int(*compar)(const void *, const void *)) nogil
 
 cdef struct psm:
-        double score
-        int label
-        unsigned int index
-
-# cdef int compare(const_void * a, const_void * b):
-#     # sort in reverse order
-#     cdef double v = ((a)).score - ((b)).score
-#     if v < 0:
-#         return 1
-#     elif v > 0:
-#         return -1
-#     else:
-#         return 0
+    double score
+    int label
+    unsigned int index
 
 cdef int compare(const void * pa, const void * pb):
     cdef double a, b 
@@ -54,18 +45,30 @@ cdef extern from "ssl.h":
                          int n, int m, double lambda_l, int verbose)
 
 def L2_SVM_MFN(features, labels, cpos, cneg, verbose = 0):
+    cdef unsigned int i
+    cdef unsigned int idx = 0
     l = features.shape
     cdef double lambda_l = 1.
-    cdef unsigned int i
     cdef int m = l[0] # num rows
     cdef int n = l[1] # num columns
-    cdef int row = 0
     cdef double *X  = <double *> malloc(m*(n+1)* sizeof(double)) # flattened array
     cdef double *Y  = <double *> malloc(m * sizeof(double))
-    cdef double *w  = <double *> malloc(n+1 * sizeof(double))
-    print("Flattening features")
-    print(l)
-    idx = 0
+    cdef double *w  = <double *> malloc((n+1) * sizeof(double))
+
+    # lambda_l = 1.
+    # m = l[0] # num rows
+    # n = l[1] # num columns
+    # X = (ctypes.c_double * (m*(n+1)))()
+    # Y = (ctypes.c_double * m)()
+    # w = (ctypes.c_double * (n+1))()
+
+    # libssl.call_L2_SVM_MFN.argtypes = [ctypes.POINTER(ctypes.c_double),
+    #                                    ctypes.POINTER(ctypes.c_double),
+    #                                    ctypes.POINTER(ctypes.c_double),
+    #                                    ctypes.c_double, ctypes.c_double,
+    #                                    ctypes.c_int, ctypes.c_int,
+    #                                    ctypes.c_double, ctypes.c_int]
+
     for i in range(m):
         Y[i] = labels[i]
         for j in range(n):
@@ -73,19 +76,13 @@ def L2_SVM_MFN(features, labels, cpos, cneg, verbose = 0):
             idx += 1
         X[idx] = 1.
         idx += 1
-    print("Done flattening, calling l2-svm-mfn")
+    # libssl.call_L2_SVM_MFN(X, Y, w, cpos, cneg, n+1, m, lambda_l, verbose)
     call_L2_SVM_MFN(X, Y, w, cpos, cneg, n+1, m, lambda_l, verbose)
-    print("done")
-    wout = []
-    for i in range(n+1):
-        print("w[%d]=%f" % (i, w[i]))
-        wout.append(w[i])
-    print("done copying weights")
+    wout = np.array([w[i] for i in range(n+1)])
     free(X)
     free(Y)
     free(w)
-    print("Exitting the function")
-    return np.ndarray(wout)
+    return wout
 
 #########################################################
 #########################################################

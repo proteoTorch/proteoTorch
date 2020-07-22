@@ -19,7 +19,8 @@ from sklearn.svm import LinearSVC as svc
 from sklearn import preprocessing
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
-from svmlin import svmlin
+# from solvers.l2_svm_mfn import L2_SVM_MFN
+# from svmlin import svmlin
 
 from qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ, L2_SVM_MFN # load cython library
 # try:
