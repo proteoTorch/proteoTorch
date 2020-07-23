@@ -8,12 +8,14 @@
 
 from libcpp.vector cimport vector
 from libc.stdlib cimport malloc, free, qsort
+from libcpp cimport bool
+from libcpp.algorithm cimport sort as stdsort
 import operator
 
 _includeNegativesInResult=True
 _scoreInd=0
 _labelInd=1
-
+_doStdSort=False
 
 cdef extern from "stdlib.h":
     void qsort(void *base, int nmemb, int size,
@@ -23,16 +25,6 @@ cdef struct psm:
         double score
         int label
         unsigned int index
-
-# cdef int compare(const_void * a, const_void * b):
-#     # sort in reverse order
-#     cdef double v = ((a)).score - ((b)).score
-#     if v < 0:
-#         return 1
-#     elif v > 0:
-#         return -1
-#     else:
-#         return 0
 
 cdef int compare(const void * pa, const void * pb):
     cdef double a, b 
@@ -45,6 +37,9 @@ cdef int compare(const void * pa, const void * pb):
         return -1
     else:
         return 0
+
+cdef bool stdsortCompare(psm pa, psm pb):
+    return (pa.score > pb.score)
 
 #########################################################
 #########################################################
@@ -69,7 +64,12 @@ def qMedianDecoyScore(scores, labels, thresh = 0.01, skipDecoysPlusOne = False):
         allScores[idx].label = labels[idx]
         allScores[idx].index = idx
     # psmsort(allScores, numPsms)
-    qsort(allScores, numPsms, sizeof(psm), compare)
+    # qsort(allScores, numPsms, sizeof(psm), compare)
+    if _doStdSort:
+        stdsort(allScores, allScores+numPsms, stdsortCompare)
+    else:
+        qsort(allScores, numPsms, sizeof(psm), compare)
+
     cdef double pi0 = 1.
     cdef int sdpo = 0
     if skipDecoysPlusOne:
@@ -217,7 +217,13 @@ def calcQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False,
         allScores[idx].label = labels[idx]
         allScores[idx].index = idx
     # psmsort(allScores, numPsms)
-    qsort(allScores, numPsms, sizeof(psm), compare)
+    # qsort(allScores, numPsms, sizeof(psm), compare)
+    # stdsort(allScores, allScores+numPsms, stdsortCompare)
+    if _doStdSort:
+        stdsort(allScores, allScores+numPsms, stdsortCompare)
+    else:
+        qsort(allScores, numPsms, sizeof(psm), compare)
+
     cdef double pi0 = 1.
     cdef int sdpo = 0
     if skipDecoysPlusOne:
@@ -261,7 +267,11 @@ def calcQAndNumIdentified(scores, labels, thresh = 0.01, skipDecoysPlusOne = Fal
         allScores[idx].label = labels[idx]
         allScores[idx].index = idx
     # psmsort(allScores, numPsms)
-    qsort(allScores, numPsms, sizeof(psm), compare)
+    if _doStdSort:
+        stdsort(allScores, allScores+numPsms, stdsortCompare)
+    else:
+        qsort(allScores, numPsms, sizeof(psm), compare)
+
     cdef double pi0 = 1.
     qvals = getQValues(pi0, allScores, numPsms,
                        skipDecoysPlusOne, verb)
@@ -297,7 +307,10 @@ def numIdentifiedAtQ(scores, labels, thresh = 0.01, skipDecoysPlusOne = False, v
         allScores[idx].label = labels[idx]
         allScores[idx].index = idx
     # psmsort(allScores, numPsms)
-    qsort(allScores, numPsms, sizeof(psm), compare)
+    if _doStdSort:
+        stdsort(allScores, allScores+numPsms, stdsortCompare)
+    else:
+        qsort(allScores, numPsms, sizeof(psm), compare)
     cdef double pi0 = 1.
     qvals = getQValues(pi0, allScores, numPsms,
                        skipDecoysPlusOne, verb)

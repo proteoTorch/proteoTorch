@@ -810,6 +810,7 @@ def mainIter(hyperparams):
         print("Selected method 2, SVM learning with L2-SVM-MFN,")
         print("but this solver could be found.  Please build this solver")
         print("in the solvers directory or select a different method.")
+        exit(-1)
 
     output_dir = hyperparams['output_dir']
     if output_dir is None:
