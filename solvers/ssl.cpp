@@ -1,6 +1,4 @@
 /*    Copyright 2006 Vikas Sindhwani (vikass@cs.uchicago.edu)
-	  Modified  2014 Phong Vo        (phong.vodinh@gmail.com, dinphong.vo@cea.fr)
-
       SVM-lin: Fast SVM Solvers for Supervised and Semi-supervised Learning
 
       This file is part of SVM-lin.
@@ -39,7 +37,7 @@ int CGLS(const struct data *Data,
 	 const struct vector_int *Subset, 
 	 struct vector_double *Weights,
 	 struct vector_double *Outputs,
-   int verbose)
+	 int verbose)
 {
   if(VERBOSE_CGLS)
     cout << "CGLS starting..." << endl;
@@ -68,11 +66,11 @@ int CGLS(const struct data *Data,
   for(i = n ; i-- ;)
     r[i] = 0.0;
   for(j=0; j < active; j++){
-      ii=J[j];
-      for (i = n - 1; i--;) {
-	r[i] += set[i + ii*n] * z[j];
-      }
-      r[n - 1] += z[j];
+    ii=J[j];
+    for (i = n - 1; i--;) {
+      r[i] += set[i + ii*n] * z[j];
+    }
+    r[n - 1] += z[j];
   }
   double *p = new double[n];   
   double omega1 = 0.0;
@@ -104,19 +102,6 @@ int CGLS(const struct data *Data,
 	  for (j = 0; j < n - 1; j++) {
 	    t += set[j + ii * n] * p[j];
 	  }
-
-	  // double* val = set[ii];
-	  // for (j = 0; j < n - 1; j++) {
-	  //   t += val[j] * p[j];
-	  // }
-	  // t += p[n - 1];
-
-	  // for(j=row[ii]; j < row[ii+1]; j++){
-	  //   if(col[j] == n-1)
-	  //     t+= p[n-1];
-	  //   else
-	  //     t+=val[j]*p[col[j]];
-	  // }
 	  q[i]=t;
 	  omega_q += C[ii]*t*t;
 	}       
@@ -143,19 +128,6 @@ int CGLS(const struct data *Data,
 	    r[i] += set[i + ii * n] * t;
 	  }
 	  r[n - 1] += t;
-
-	  // double* val = set[ii];
-	  // for (register int i = 0; i < n - 1; i++) {
-	  //   r[i] += val[i] * t;
-	  // }
-	  // r[n - 1] += t;
-	  // ///// HERE
-	  // for(register int i=row[ii]; i < row[ii+1]; i++){
-	  //   if(col[i] == n-1)
-	  //     r[n-1] += t;
-	  //   else
-	  //     r[col[i]]+=val[i]*t;
-	  // }
 	}
       omega1 = 0.0;
       for(int i = n ; i-- ;)
@@ -216,14 +188,6 @@ int L2_SVM_MFN(const struct data *Data,
   vector_int *ActiveSubset = new vector_int[1];
   ActiveSubset->vec = new int[m];
   ActiveSubset->d = m;
-  // for(int i=0;i<n;i++) w[i] = 0.0;
-  // // initialize
-  // if(ini==0) {
-  //   epsilon=BIG_EPSILON; 
-  //   Options->cgitermax=SMALL_CGITERMAX; 
-  //   Options->epsilon=BIG_EPSILON;
-  // }
-  // else {epsilon = Options->epsilon;}  
   for(int i=0;i<n;i++) F+=w[i]*w[i];
   F=0.5*lambda_l*F;        
   int active=0;
@@ -276,12 +240,6 @@ int L2_SVM_MFN(const struct data *Data,
 	  for (register int j = n - 1; j--;) {
 	    t += set[j + ii * n] * w_bar[j];
 	  }
-	  // double* val = set[ii];
-	  // cout << "there\n";
-	  // t = w_bar[n - 1];
-	  // for (register int j = n - 1; j--;) {
-	  //   t += val[j] * w_bar[j];
-	  // }
 	  o_bar[ii]=t;
 	}
       if(ini==0) {
@@ -304,8 +262,8 @@ int L2_SVM_MFN(const struct data *Data,
 	    {
 	      epsilon=EPSILON;
 	      Options->epsilon=EPSILON;
-        if (verbose > 0)
-	       cout << "  epsilon = " << BIG_EPSILON << " case converged (speedup heuristic 2). Continuing with epsilon=" <<  EPSILON << endl;
+	      if (verbose > 0)
+		cout << "  epsilon = " << BIG_EPSILON << " case converged (speedup heuristic 2). Continuing with epsilon=" <<  EPSILON << endl;
 	      continue;
 	    }
 	  else
@@ -314,16 +272,16 @@ int L2_SVM_MFN(const struct data *Data,
 		w[i]=w_bar[i];      
 	      for(int i=m; i-- ;)
 		o[i]=o_bar[i]; 
-	       delete[] ActiveSubset->vec;
-	       delete[] ActiveSubset;
-	       delete[] o_bar;
-	       delete[] w_bar;
-	       delete[] Weights_bar;
-	       delete[] Outputs_bar;
-	       tictoc.stop();
-         if (verbose > 0)
-	         cout << "L2_SVM_MFN converged (optimality) in " << iter << " iteration(s) and "<< tictoc.time() << " seconds. \n" << endl;
-	       return 1;      
+	      delete[] ActiveSubset->vec;
+	      delete[] ActiveSubset;
+	      delete[] o_bar;
+	      delete[] w_bar;
+	      delete[] Weights_bar;
+	      delete[] Outputs_bar;
+	      tictoc.stop();
+	      if (verbose > 0)
+		cout << "L2_SVM_MFN converged (optimality) in " << iter << " iteration(s) and "<< tictoc.time() << " seconds. \n" << endl;
+	      return 1;      
 	    }
 	}
       if (verbose > 0)
@@ -359,8 +317,8 @@ int L2_SVM_MFN(const struct data *Data,
       ActiveSubset->d=active;      
       if(fabs(F-F_old)<RELATIVE_STOP_EPS*fabs(F_old))
 	{
-    if (verbose > 0)
-	   cout << "L2_SVM_MFN converged (rel. criterion) in " << iter << " iterations and "<< tictoc.time() << " seconds. \n" << endl;
+	  if (verbose > 0)
+	    cout << "L2_SVM_MFN converged (rel. criterion) in " << iter << " iterations and "<< tictoc.time() << " seconds. \n" << endl;
 	  return 2;
 	}
     }
@@ -386,69 +344,69 @@ double line_search(double *w,
                    int d, /* data dimensionality -- 'n' */
                    int l) /* number of examples */                  
 {                       
-   double omegaL = 0.0;
-   double omegaR = 0.0;
-   double diff=0.0;   
-   for(int i=d; i--; ) {
-         diff=w_bar[i]-w[i];  
-         omegaL+=w[i]*diff;
-         omegaR+=w_bar[i]*diff;
-   }
-   omegaL=lambda_l*omegaL;
-   omegaR=lambda_l*omegaR;
-   double L=0.0;
-   double R=0.0;
-   int ii=0;
-   for(int i=0;i<l;i++)
-       {
-         if(Y[i]*o[i]<1)
-	   {
-	     diff=C[i]*(o_bar[i]-o[i]);  
-	     L+=(o[i]-Y[i])*diff;
-	     R+=(o_bar[i]-Y[i])*diff;
-	   }
-       }
-   L+=omegaL;
-   R+=omegaR;
-   Delta* deltas=new Delta[l];    
-   int p=0;
-   for(int i=0;i<l;i++){ 
-       diff=Y[i]*(o_bar[i]-o[i]);
-       if(Y[i]*o[i]<1)
-	 {
-	   if(diff>0)
-	     {
-	       deltas[p].delta=(1-Y[i]*o[i])/diff;
-	       deltas[p].index=i;
-	       deltas[p].s=-1;
-	       p++;
-	     }
-	 }
-       else
-	 {
-	   if(diff<0)
-	     {
-	       deltas[p].delta=(1-Y[i]*o[i])/diff;
-	       deltas[p].index=i;
-	       deltas[p].s=1;      
-	       p++;
-	     }
-	 }
-     }
-   sort(deltas,deltas+p);            
-   double delta_prime=0.0;  
-   for(int i=0;i<p;i++)
-     {
-       delta_prime = L + deltas[i].delta*(R-L);       
-       if(delta_prime>=0)
-	 break;
-       ii=deltas[i].index;   
-       diff=(deltas[i].s)*C[ii]*(o_bar[ii]-o[ii]);
-       L+=diff*(o[ii]-Y[ii]);
-       R+=diff*(o_bar[ii]-Y[ii]);
-     }   
-   delete [] deltas;
-   return (-L/(R-L));
+  double omegaL = 0.0;
+  double omegaR = 0.0;
+  double diff=0.0;   
+  for(int i=d; i--; ) {
+    diff=w_bar[i]-w[i];  
+    omegaL+=w[i]*diff;
+    omegaR+=w_bar[i]*diff;
+  }
+  omegaL=lambda_l*omegaL;
+  omegaR=lambda_l*omegaR;
+  double L=0.0;
+  double R=0.0;
+  int ii=0;
+  for(int i=0;i<l;i++)
+    {
+      if(Y[i]*o[i]<1)
+	{
+	  diff=C[i]*(o_bar[i]-o[i]);  
+	  L+=(o[i]-Y[i])*diff;
+	  R+=(o_bar[i]-Y[i])*diff;
+	}
+    }
+  L+=omegaL;
+  R+=omegaR;
+  Delta* deltas=new Delta[l];    
+  int p=0;
+  for(int i=0;i<l;i++){ 
+    diff=Y[i]*(o_bar[i]-o[i]);
+    if(Y[i]*o[i]<1)
+      {
+	if(diff>0)
+	  {
+	    deltas[p].delta=(1-Y[i]*o[i])/diff;
+	    deltas[p].index=i;
+	    deltas[p].s=-1;
+	    p++;
+	  }
+      }
+    else
+      {
+	if(diff<0)
+	  {
+	    deltas[p].delta=(1-Y[i]*o[i])/diff;
+	    deltas[p].index=i;
+	    deltas[p].s=1;      
+	    p++;
+	  }
+      }
+  }
+  sort(deltas,deltas+p);            
+  double delta_prime=0.0;  
+  for(int i=0;i<p;i++)
+    {
+      delta_prime = L + deltas[i].delta*(R-L);       
+      if(delta_prime>=0)
+	break;
+      ii=deltas[i].index;   
+      diff=(deltas[i].s)*C[ii]*(o_bar[ii]-o[ii]);
+      L+=diff*(o[ii]-Y[ii]);
+      R+=diff*(o_bar[ii]-Y[ii]);
+    }   
+  delete [] deltas;
+  return (-L/(R-L));
 } 
 
 /********************** UTILITIES ********************/
@@ -463,7 +421,7 @@ double norm_square(const vector_double *A)
   return x;
 } 
 void init_vec_double(struct vector_double *A, int k, double a)
- {
+{
   double *vec = new double[k];
   for(int i=0;i<k;i++)
     vec[i]=a;
@@ -481,11 +439,11 @@ void init_vec_int(struct vector_int *A, int k)
   return;
 }
 
-void ssl_train(struct data *Data, 
-         struct options *Options, 
-         struct vector_double *Weights,
-         struct vector_double *Outputs,
-         int verbose)
+void call_L2_SVM_MFN(struct data *Data, 
+		     struct options *Options, 
+		     struct vector_double *Weights,
+		     struct vector_double *Outputs,
+		     int verbose)
 {
   // initialize 
   init_vec_double(Weights,Data->n,0.0);

@@ -19,7 +19,13 @@ from sklearn.svm import LinearSVC as svc
 from sklearn import preprocessing
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
-from svmlin import svmlin
+
+try:
+    from solvers import l2_svm_mfn
+    svmlinReady = True
+except:
+    print("Loaded all solvers except L2-SVM-MFN")
+    svmlinReady = False
 
 try:
     from qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
@@ -685,7 +691,8 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
             else:
                 # clf = getPercWeights(currIter, kFold)
                 # clf = getPercKimWeights(currIter, kFold)
-                clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+                clf = l2_svm_mfn.solver(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
             currentTaq = len(tp)
@@ -798,7 +805,12 @@ def mainIter(hyperparams):
     global _seed, _verb
     _seed=hyperparams['seed']
     _verb=hyperparams['verbose']
-    
+
+    if hyperparams['method']==2 and not svmlinReady:
+        print("Selected method 2, SVM learning with L2-SVM-MFN,")
+        print("but this solver could be found.  Please build this solver")
+        print("in the solvers directory or select a different method.")
+
     output_dir = hyperparams['output_dir']
     if output_dir is None:
         output_dir = 'model_output/{}/{}/'.format(hyperparams['pin'].split('/')[-1], mini_utils.TimeStamp())

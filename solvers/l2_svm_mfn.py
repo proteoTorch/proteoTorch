@@ -1,17 +1,14 @@
-'''   
 '''
-from ctypes import * 
-from ctypes.util import find_library
+'''
 from os import path
 import numpy as np 
-import sys 
+from ctypes import *
 
-# load library 
-try: 
-        dirname = path.dirname(path.abspath(__file__))
-        libssl = CDLL(path.join(dirname, 'libssl.so'))
+try:
+	dirname = path.dirname(path.abspath(__file__))
+	libssl = CDLL(path.join(dirname, 'libssl.so'))
 except:
-        raise Exception('libssl.so not found')
+	raise Exception("Could not find libssl.so")
 
 def genFields(names, types):
 	return list(zip(names, types))
@@ -56,32 +53,31 @@ class data(Structure):
 		self.n = X.shape[1]+1
 
 		# allocate memory
-                self.X = (c_double * (self.n*self.m))()
+		self.X = (c_double * (self.n*self.m))()
 		self.Y = (c_double * self.m)()
 		self.C = (c_double * self.m)()
 
-                idx = 0
+		idx = 0
 		# copying data
-                for i in range(self.m):
-                        for j in range(self.n-1):
-                                self.X[idx] = X[i,j]
-                                idx += 1
-                        self.X[idx] = 1.
-                        idx += 1
+		for i in range(self.m):
+			for j in range(self.n-1):
+				self.X[idx] = X[i,j]
+				idx += 1
+			self.X[idx] = 1.
+			idx += 1
 
 		# set labels
 		for i,v in enumerate(y):
 			self.Y[i] = v
-                        if v == 1:
-                                self.C[i] = cp
-                        elif v== -1:
-                                self.C[i] = cn
-                        else:
-                                self.C[i] = 1.0
+			if v == 1:
+				self.C[i] = cp
+			elif v== -1:
+				self.C[i] = cn
+			else:
+				self.C[i] = 1.0
 	def __init__(self):
 		self.__createfrom__ = 'python'
 		self.__frombuffer__ = True
-
 
 	def dump(self, filename):
 		with open(filename, 'wt') as fout:
@@ -94,7 +90,7 @@ class data(Structure):
 				stop_ix = self.rowptr[j+1]
 				for i in range(start_ix, stop_ix-1):
 					fout.write('%d:%2.4f ' % (self.colind[i]+1, self.val[i]))
-				fout.write('\n')
+					fout.write('\n')
 
 class vector_double(Structure):
 	_names = ['d', 'vec']
@@ -175,9 +171,44 @@ class options(Structure):
 		return s
 
 
-fillprototype(libssl.ssl_train, None, [POINTER(data), POINTER(options), POINTER(vector_double), POINTER(vector_double), c_int])
-# fillprototype(libssl.L2_SVM_MFN, None, [POINTER(data), POINTER(options), POINTER(vector_double), POINTER(vector_double), c_int])
+fillprototype(libssl.call_L2_SVM_MFN, None, [POINTER(data), POINTER(options), POINTER(vector_double), POINTER(vector_double), c_int])
 fillprototype(libssl.init_vec_double, None, [POINTER(vector_double), c_int, c_double])
 fillprototype(libssl.init_vec_int, None, [POINTER(vector_int), c_int])
 fillprototype(libssl.clear_vec_double, None, [POINTER(vector_double)])
 fillprototype(libssl.clear_vec_int, None, [POINTER(vector_int)])
+
+def solver(X, y, verbose, **kwargs):
+	# check y
+	if not isinstance(y, np.ndarray):
+		if not isinstance(y, list):
+			raise ValueError('y must be an iterable type (list, numpy.ndarray)')
+		else:
+			y = np.array(y)
+	else:
+		if np.prod(y.shape) != y.shape[0]:
+			raise ValueError('y must be a column or row vector')
+
+	# check y
+	labels = set(y)
+	if not (labels == set([1.0,-1.0,0.0])) and not (labels == set([1.0,-1.0])):
+		raise ValueError('label array must contain positive(+1) and negative (-1) samples, and optionally unlabeled ones (0).')
+
+	# check x vs. y
+	if not isinstance(X, np.ndarray):
+		raise ValueError('X and y must be numpy.ndarray')
+	elif X.shape[0] != y.shape[0]:
+		raise ValueError('X and y must have  the same number of samples')
+
+	ssl_data = data()
+	ssl_weights = vector_double()
+	ssl_options = options(**kwargs)
+	ssl_data.from_data(X,y, ssl_options.Cp, ssl_options.Cn)
+	ssl_outputs = vector_double()
+	libssl.call_L2_SVM_MFN(ssl_data, ssl_options, ssl_weights, ssl_outputs, verbose)
+	
+	clf = np.array(np.fromiter(ssl_weights.vec, dtype=np.float64, count=ssl_weights.d))
+
+	libssl.clear_vec_double(ssl_outputs)
+	libssl.clear_vec_double(ssl_weights)
+
+	return clf
