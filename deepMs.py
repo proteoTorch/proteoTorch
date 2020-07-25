@@ -890,7 +890,6 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         
         DNN will warm-start training the models the different folds between iterations.
     """
-    #totalTaq = 0 # total number of estimated true positives at q-value threshold
     # record new scores as we go
     # newScores = np.zeros(scores.shape)
     newScores = []
@@ -913,7 +912,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     elif method==2:
         isSvm = True
 
-    if not isSvm:
+    if not isSvm: # check whether we need to parallelize the SVM grid search
         for kFold, cvBinSids in enumerate(keys):
             # Find training set using q-value analysis
             taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
@@ -931,6 +930,9 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         
             if method == 0:
                 topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
+            # elif method in [1, 2]:
+            #     topScores, bestTaq, bestClf = doSvmGridSearch_threaded(thresh, kFold, features, labels,validation_Features, validation_Labels,
+            #                                                   cposes, cfracs, alpha, tron, currIter, numThreads)
             else:
                 topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
                                                                      validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
