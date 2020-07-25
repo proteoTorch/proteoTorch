@@ -1088,6 +1088,17 @@ def mainIter(hyperparams):
             break
         fpoo = fpo
         fpo = fp
+
+        # write output for iteration
+        isSvmlin = (hyperparams['method']==2)
+        testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
+        testScores = doMergeScores(q, testKeys, testScores, Y)
+        taq, _, qs = calcQ(testScores, Y, q, False)
+        if not _identOutput:
+            writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+        else:
+            writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
+
     isSvmlin = (hyperparams['method']==2)
     testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
     print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
