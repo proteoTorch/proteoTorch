@@ -21,6 +21,8 @@ import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 import multiprocessing as mp
 
+_mp_data = {}
+
 try:
     from solvers import l2_svm_mfn
     svmlinReady = True
@@ -796,6 +798,26 @@ def evalSvmCposCnegPair(features, labels,
         print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
     return (cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
 
+def evalSvmCposCnegPair_globalDataMatrix(tron, cpos, cfrac, alpha, thresh, kFold):
+    features = _mp_data[(kFold, 'X')]
+    labels = _mp_data[(kFold, 'Y')]
+    validation_Features = _mp_data[(kFold, 'validation_X')]
+    validation_Labels = _mp_data[(kFold, 'validation_Y')]
+    cneg = cfrac*cpos
+    if tron:
+        classWeight = {1: alpha * cpos, -1: alpha * cneg}
+        clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-7)
+        clf.fit(features, labels)
+        validation_scores = clf.decision_function(validation_Features)
+    else:
+        clf = l2_svm_mfn.solver(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+        validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
+    tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
+    currentTaq = len(tp)
+    if _debug and _verb > 2:
+        print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
+    return (kFold, cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
+
 def doSvmGridSearch_threaded(thresh, kFold, features, labels, validation_Features, validation_Labels, 
                              cposes, cfracs, alpha, tron = True, currIter=1, numThreads = 1):
     bestTaq = -1.
@@ -882,41 +904,86 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     alpha = 1.
     if prev_iter_models is None or len(prev_iter_models) < len(keys):
         prev_iter_models = [None] * len(keys)
+
+    isSvm = False
     if method==1:
         tron = True
         alpha = 0.5
-    
-    for kFold, cvBinSids in enumerate(keys):
-        # Find training set using q-value analysis
-        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
-        td = [cvBinSids[i] for i in taq]
-        gd = getDecoyIdx(Y, cvBinSids)
-        # Debugging check
-        if _debug and _verb >= 1:
-            print("CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq)))
-        trainSids = gd + td
-        validation_Sids = cvBinSids
-        features = X[trainSids]
-        labels = Y[trainSids]
-        validation_Features = X[validation_Sids]
-        validation_Labels = Y[validation_Sids]
+        isSvm = True
+    elif method==2:
+        isSvm = True
+
+    if not isSvm:
+        for kFold, cvBinSids in enumerate(keys):
+            # Find training set using q-value analysis
+            taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
+            td = [cvBinSids[i] for i in taq]
+            gd = getDecoyIdx(Y, cvBinSids)
+            # Debugging check
+            if _debug and _verb >= 1:
+                print("CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq)))
+            trainSids = gd + td
+            validation_Sids = cvBinSids
+            features = X[trainSids]
+            labels = Y[trainSids]
+            validation_Features = X[validation_Sids]
+            validation_Labels = Y[validation_Sids]
         
-        if method == 0:
-            topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
-        elif method in [1, 2]:
-            if numThreads <=1:
-                topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
-                                                              cposes, cfracs, alpha, tron, currIter)
+            if method == 0:
+                topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
             else:
-                topScores, bestTaq, bestClf = doSvmGridSearch_threaded(thresh, kFold, features, labels,validation_Features, validation_Labels,
-                                                                       cposes, cfracs, alpha, tron, currIter, numThreads)
-        elif method == 3:
-            topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                                 validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
-        all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
-        newScores.append(topScores)
-        clfs.append(bestClf)
-        estTaq += bestTaq
+                topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
+                                                                     validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
+            all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
+            newScores.append(topScores)
+            clfs.append(bestClf)
+            estTaq += bestTaq
+    else: # parallelize over CV bins and SVM grid search with minimal data copying overhead
+        newScores = [None, None, None]
+        clfs = [None, None, None]
+        all_AUCs = [None, None, None]
+        bestTaqs = [-1, -1, -1]
+        bestCps = [-1, -1, -1]
+        bestCns = [-1, -1, -1]
+        cposCfracPairs = [(cpos, cfrac, kFold) for cpos in cposes for cfrac in cfracs for kFold in range(len(keys))]
+        for kFold, cvBinSids in enumerate(keys): # first make global training and validation sets
+            # Find training set using q-value analysis
+            taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
+            td = [cvBinSids[i] for i in taq]
+            gd = getDecoyIdx(Y, cvBinSids)
+            # Debugging check
+            if _debug and _verb >= 1:
+                print("CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq)))
+            trainSids = gd + td
+            validation_Sids = cvBinSids
+            global _mp_data
+            _mp_data[(kFold, 'X')] = X[trainSids]
+            _mp_data[(kFold, 'Y')] = Y[trainSids]
+            _mp_data[(kFold, 'validation_X')] = X[validation_Sids]
+            _mp_data[(kFold, 'validation_Y')] = Y[validation_Sids]
+        numThreads = min([mp.cpu_count() - 1, numThreads, len(cposCfracPairs)])
+        pool = mp.Pool(processes = numThreads)
+        results = [pool.apply_async(evalSvmCposCnegPair_globalDataMatrix,
+                                    args=(tron, cpos, cfrac, alpha, thresh, kFold)) 
+                   for (cpos,cfrac, kFold) in cposCfracPairs]
+        
+        pool.close()
+        pool.join() # wait for jobs to finish before continuing
+        for p in results:
+            cposCnegCandidate = p.get()
+            kFold = cposCnegCandidate[0]
+            currentTaq = cposCnegCandidate[3]
+            if currentTaq > bestTaqs[kFold]:
+                bestTaqs[kFold] = currentTaq
+                bestCps[kFold] = cposCnegCandidate[1]
+                bestCns[kFold] = cposCnegCandidate[2]
+                newScores[kFold] = np.array(cposCnegCandidate[4])
+                clfs[kFold] = deepcopy(cposCnegCandidate[5])
+        for kFold in range(len(keys)):
+            tp, _, _ = calcQ(newScores[kFold], _mp_data[kFold, 'validation_Y'], thresh)
+            bestTaqs[kFold] = len(tp)
+            all_AUCs[kFold] = AUC_fn_001(newScores[kFold], _mp_data[kFold, 'validation_Y'] )
+        estTaq = sum(bestTaqs)
     estTaq /= 2
     return newScores, estTaq, clfs, np.mean(all_AUCs)
 
