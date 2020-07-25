@@ -19,6 +19,7 @@ from sklearn.svm import LinearSVC as svc
 from sklearn import preprocessing
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
+import multiprocessing as mp
 
 try:
     from solvers import l2_svm_mfn
@@ -423,10 +424,74 @@ def findInitDirection(X, Y, thresh, featureNames):
                     print("Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
     return initDirection, numIdentified, negBest
 
+def evalDirectionInThread(i, scores, Y, thresh, featureNames):
+    negBest = False
+    numIdentified = -1
+    # Check scores multiplied by both 1 and positive -1
+    for checkNegBest in range(2):
+        if checkNegBest==1:
+            taq, _, _ = calcQ(-1. * scores, Y, thresh, True)
+        else:
+            taq, _, _ = calcQ(scores, Y, thresh, True)
+        if len(taq) > numIdentified:
+            numIdentified = len(taq)
+            negBest = checkNegBest==1
+        if _debug and _verb >= 2:
+            if checkNegBest==1:
+                print("Direction -%d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
+            else:
+                print("Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
+    return (i,numIdentified, negBest)
+
+    
+def findInitDirection_threaded(X, Y, thresh, featureNames, 
+                               numThreads = 1):
+    l = X.shape
+    m = l[1] # number of columns/features
+    initDirection = -1
+    numIdentified = -1
+    # TODO: add check verifying best direction idetnfies more than -1 spectra, otherwise something
+    # went wrong
+    negBest = False
+
+    # create threadpool
+    numThreads = min([mp.cpu_count() - 1, numThreads, m])
+    pool = mp.Pool(processes = numThreads)
+
+    # distribute jobs
+    results = [pool.apply_async(evalDirectionInThread, 
+                                args=(i, X[:,i], Y, thresh, featureNames)) 
+               for i in range(m)]
+    # for i in range(m):
+    #     scores = X[:,i]
+    #     # Check scores multiplied by both 1 and positive -1
+    #     for checkNegBest in range(2):
+    #         if checkNegBest==1:
+    #             taq, _, _ = calcQ(-1. * scores, Y, thresh, True)
+    #         else:
+    #             taq, _, _ = calcQ(scores, Y, thresh, True)
+    #         if len(taq) > numIdentified:
+    #             initDirection = i
+    #             numIdentified = len(taq)
+    #             negBest = checkNegBest==1
+    #         if _debug and _verb >= 2:
+    #             if checkNegBest==1:
+    #                 print("Direction -%d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
+    #             else:
+    #                 print("Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
+    pool.close()
+    pool.join() # wait for jobs to finish before continuing
+
+    for d in results:
+        direction = d.get()
+        if(direction[1] > numIdentified):
+            initDirection = direction[0]
+            numIdentified = direction[1]
+            negBest = direction[2]
+    return initDirection, numIdentified, negBest
 
 def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
-    """ Iterate through cross validation training sets and find initial search directions
-        Returns the scores for the disjoint bins
+    """ Given initial search directions, returns the scores for the disjoint bins
     """
     initTaq = 0.
     scores = []
@@ -455,7 +520,7 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
     return scores, initTaq
 
 
-def searchForInitialDirection_split(keys, X, Y, q, featureNames):
+def searchForInitialDirection_split(keys, X, Y, q, featureNames, numThreads = 1):
     """ Iterate through cross validation training sets and find initial search directions
         Returns the scores for the disjoint bins
     """
@@ -464,7 +529,10 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames):
     kFold = 0
     for trainSids in keys:
         # Find initial direction
-        initDir, numIdentified, negBest = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+        if numThreads <=1:
+            initDir, numIdentified, negBest = findInitDirection(X[trainSids], Y[trainSids], q, featureNames)
+        else:
+            initDir, numIdentified, negBest = findInitDirection_threaded(X[trainSids], Y[trainSids], q, featureNames, numThreads)
 
         initTaq += numIdentified
         if negBest:
@@ -710,6 +778,57 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
         print("CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq))
     return topScores, bestTaq, bestClf
 
+def evalSvmCposCnegPair(features, labels, 
+                        validation_Features, validation_Labels,
+                        tron, cpos, cfrac, alpha, thresh, kFold):
+    cneg = cfrac*cpos
+    if tron:
+        classWeight = {1: alpha * cpos, -1: alpha * cneg}
+        clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-7)
+        clf.fit(features, labels)
+        validation_scores = clf.decision_function(validation_Features)
+    else:
+        clf = l2_svm_mfn.solver(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+        validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
+    tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
+    currentTaq = len(tp)
+    if _debug and _verb > 2:
+        print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
+    return (cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
+
+def doSvmGridSearch_threaded(thresh, kFold, features, labels, validation_Features, validation_Labels, 
+                             cposes, cfracs, alpha, tron = True, currIter=1, numThreads = 1):
+    bestTaq = -1.
+    bestCp = 1.
+    bestCn = 1.
+    bestClf = []
+    cposCfracPairs = [(cpos, cfrac) for cpos in cposes for cfrac in cfracs]
+
+    numThreads = min([mp.cpu_count() - 1, numThreads, len(cposCfracPairs)])
+    pool = mp.Pool(processes = numThreads)
+    results = [pool.apply_async(evalSvmCposCnegPair,
+                                args=(features, labels, validation_Features, validation_Labels,
+                                      tron, cpos, cfrac, alpha, thresh, kFold)) 
+               for (cpos,cfrac) in cposCfracPairs]
+
+    pool.close()
+    pool.join() # wait for jobs to finish before continuing
+
+    for p in results:
+        cposCnegCandidate = p.get()
+        currentTaq = cposCnegCandidate[2]
+        if currentTaq > bestTaq:
+            bestTaq = currentTaq
+            bestCp = cposCnegCandidate[0]
+            bestCn = cposCnegCandidate[1]
+            topScores = np.array(cposCnegCandidate[3])
+            bestClf = deepcopy(cposCnegCandidate[4])
+    tp, _, _ = calcQ(topScores, validation_Labels, thresh)
+    bestTaq = len(tp)
+    if _debug and _verb > 1:
+        print("CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq))
+    return topScores, bestTaq, bestClf
+
 
 #########################################################
 #########################################################
@@ -740,7 +859,7 @@ def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
 ################### Main training functions
 #########################################################
 #########################################################
-def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1, dnn_hyperparams={}, prev_iter_models=[]):
+def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1, dnn_hyperparams={}, prev_iter_models=[], numThreads = 1):
     """ Train a classifier on CV bins.
         Method 0: LDA
         Method 1: linear SVM, solver TRON
@@ -785,8 +904,12 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         if method == 0:
             topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
         elif method in [1, 2]:
-            topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
-                                                          cposes, cfracs, alpha, tron, currIter)
+            if numThreads <=1:
+                topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
+                                                              cposes, cfracs, alpha, tron, currIter)
+            else:
+                topScores, bestTaq, bestClf = doSvmGridSearch_threaded(thresh, kFold, features, labels,validation_Features, validation_Labels,
+                                                                       cposes, cfracs, alpha, tron, currIter, numThreads)
         elif method == 3:
             topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
                                                                  validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
@@ -844,7 +967,7 @@ def mainIter(hyperparams):
         print("Using specified initial direction %d" % (initDir))
         scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
     else:
-        scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames)
+        scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
     print("Could initially separate %d identifications" % ( initTaq / 2 ))
     # Iteratre
     fp = 0 # current number of identifications
@@ -889,7 +1012,7 @@ def mainIter(hyperparams):
 
         scores, fp, trained_models, validation_AUC = doIter(
             q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
-            dnn_hyperparams=hyperparams, prev_iter_models = trained_models)
+            dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'])
         print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
             print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
@@ -924,6 +1047,7 @@ if __name__ == '__main__':
     parser.add_option('--q6', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
+    parser.add_option('--numThreads', type = 'int', action= 'store', default=1)
     parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
     parser.add_option('--method', type = 'int', action= 'store', default = 3, 
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
