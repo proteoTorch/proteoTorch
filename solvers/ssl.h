@@ -116,7 +116,7 @@ extern "C" void call_L2_SVM_MFN(struct data *Data,
 				struct options *Options,
 				struct vector_double *W, /* weight vector */
 				struct vector_double *O,
-				int verbose); /* output vector */
+				int verbose, double cpos, double cneg); /* output vector */
 
 /* svmlin algorithms and their subroutines */
  
@@ -129,7 +129,7 @@ int CGLS(const struct data *Data,
 	 const struct vector_int *Subset,
 	 struct vector_double *Weights,
 	 struct vector_double *Outputs,
-	 int verbose);
+	 int verbose, double cpos, double cneg);
 
 /* Linear Modified Finite Newton L2-SVM*/
 /* Solves: min_w 0.5*Options->lamda*w'*w + 0.5*sum_i Data->C[i] max(0,1 - Y[i] w' x_i)^2 */
@@ -137,11 +137,11 @@ int L2_SVM_MFN(const struct data *Data,
 	       struct options *Options, 
 	       struct vector_double *Weights,
 	       struct vector_double *Outputs,
-	       int verbose); /* use ini=0 if no good starting guess for Weights, else 1 */
+	       int verbose,  double cpos, double cneg); /* use ini=0 if no good starting guess for Weights, else 1 */
 double line_search(double *w, double *w_bar,
 		   double lambda,
 		   double *o, double *o_bar, 
-		   double *Y, double *C, int d, int l);
+		   double *Y, double *C, int d, int l, double cpos, double cneg);
 
 
 #endif

@@ -171,7 +171,7 @@ class options(Structure):
 		return s
 
 
-fillprototype(libssl.call_L2_SVM_MFN, None, [POINTER(data), POINTER(options), POINTER(vector_double), POINTER(vector_double), c_int])
+fillprototype(libssl.call_L2_SVM_MFN, None, [POINTER(data), POINTER(options), POINTER(vector_double), POINTER(vector_double), c_int, c_double, c_double])
 fillprototype(libssl.init_vec_double, None, [POINTER(vector_double), c_int, c_double])
 fillprototype(libssl.init_vec_int, None, [POINTER(vector_int), c_int])
 fillprototype(libssl.clear_vec_double, None, [POINTER(vector_double)])
@@ -204,7 +204,7 @@ def solver(X, y, verbose, **kwargs):
 	ssl_options = options(**kwargs)
 	ssl_data.from_data(X,y, ssl_options.Cp, ssl_options.Cn)
 	ssl_outputs = vector_double()
-	libssl.call_L2_SVM_MFN(ssl_data, ssl_options, ssl_weights, ssl_outputs, verbose)
+	libssl.call_L2_SVM_MFN(ssl_data, ssl_options, ssl_weights, ssl_outputs, verbose, ssl_options.Cp, ssl_options.Cn)
 	
 	clf = np.array(np.fromiter(ssl_weights.vec, dtype=np.float64, count=ssl_weights.d))
 

@@ -1019,9 +1019,6 @@ def mainIter(hyperparams):
     pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(hyperparams['pin'])
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
-#    print('not normalizing the data!')
-#    X = dnn_code.preprocess_data(X)
-    # n = l[0] # number of instances
     m = l[1] # number of features
     targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
     print("Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio))
