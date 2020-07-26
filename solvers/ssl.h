@@ -44,7 +44,7 @@ extern "C" struct data
   int n; /* number of features */ 
   double* X; // flattened dense feature matrix
   double *Y;   /* labels */
-  double *C;   /* cost associated with each example */
+  /* double *C;   /\* cost associated with each example *\/ */
 };
 
 extern "C" struct vector_double /* defines a vector of doubles */
@@ -141,7 +141,7 @@ int L2_SVM_MFN(const struct data *Data,
 double line_search(double *w, double *w_bar,
 		   double lambda,
 		   double *o, double *o_bar, 
-		   double *Y, double *C, int d, int l, double cpos, double cneg);
+		   double *Y, int d, int l, double cpos, double cneg);
 
 
 #endif

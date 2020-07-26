@@ -113,7 +113,7 @@ int CGLS(const struct data *Data,
   int *J = Subset->vec;
   double* set = Data->X;
   double *Y = Data->Y;
-  double *C = Data->C;
+  // double *C = Data->C;
   int n  = Data->n;
   double lambda_l = 1.0;
   double *beta = Weights->vec;
@@ -281,7 +281,7 @@ int L2_SVM_MFN(const struct data *Data,
   tictoc.restart();
   double* set = Data->X;
   double *Y = Data->Y;
-  double *C = Data->C;
+  // double *C = Data->C;
   int n  = Data->n;
   int m  = Data->m;
   double lambda_l = 1.0;
@@ -309,7 +309,9 @@ int L2_SVM_MFN(const struct data *Data,
 	{
 	  ActiveSubset->vec[active]=i;
 	  active++;
-	  F+=0.5*C[i]*diff*diff;
+	  // C[i]
+	  F += 0.5 * ((Y[i]==1)? cpos : cneg) * diff * diff;
+	  // F+=0.5*C[i]*diff*diff;
 	}
       else
 	{
@@ -399,7 +401,7 @@ int L2_SVM_MFN(const struct data *Data,
 	}
       if (verbose > 0)
         cout << " " ;
-      delta=line_search(w,w_bar,lambda_l,o,o_bar,Y,C,n,m, cpos, cneg); 
+      delta=line_search(w,w_bar,lambda_l,o,o_bar,Y,n,m, cpos, cneg); 
       if (verbose > 0)
         cout << "LINE_SEARCH delta = " << delta << endl;     
       F_old = F;
@@ -479,7 +481,6 @@ double line_search(double *w,
                    double *o, 
                    double *o_bar, 
                    double *Y, 
-                   double *C,
                    int d, /* data dimensionality -- 'n' */
                    int l,  double cpos, double cneg) /* number of examples */                  
 {                       
@@ -575,8 +576,6 @@ void call_L2_SVM_MFN(struct data *Data,
 		     struct vector_double *Outputs,
 		     int verbose, double cpos, double cneg)
 {
-  //// here
-  // add cpos and cneg to l2-svm-mfn call
   // initialize 
   init_vec_double(Weights,Data->n,0.0);
   init_vec_double(Outputs,Data->m,0.0);
