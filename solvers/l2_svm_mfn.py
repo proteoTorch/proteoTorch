@@ -44,18 +44,16 @@ class data(Structure):
 
 	def from_data(self, X, y, cp = 1., cn = 1.):
 		self.__frombuffer__ = False
-		# TODO
-
 		# set constants
 		self.m = len(y)
 		self.l = sum(y != 0)
 		self.u = self.m - self.l
-		self.n = X.shape[1]+1
+		self.n = X.shape[1]+1 # include bias term
 
 		# allocate memory
 		self.X = (c_double * (self.n*self.m))()
 		self.Y = (c_double * self.m)()
-		self.C = (c_double * self.m)()
+		# self.C = (c_double * self.m)()
 
 		idx = 0
 		# copying data
@@ -69,12 +67,12 @@ class data(Structure):
 		# set labels
 		for i,v in enumerate(y):
 			self.Y[i] = v
-			if v == 1:
-				self.C[i] = cp
-			elif v== -1:
-				self.C[i] = cn
-			else:
-				self.C[i] = 1.0
+			# if v == 1:
+			# 	self.C[i] = cp
+			# elif v== -1:
+			# 	self.C[i] = cn
+			# else:
+			# 	self.C[i] = 1.0
 	def __init__(self):
 		self.__createfrom__ = 'python'
 		self.__frombuffer__ = True
