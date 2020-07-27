@@ -57,38 +57,16 @@ class data(Structure):
 
 		idx = 0
 		# copying data
-		for i in range(self.m):
+		for i,v in enumerate(y):
+			self.Y[i] = v
 			for j in range(self.n-1):
 				self.X[idx] = X[i,j]
 				idx += 1
 			self.X[idx] = 1.
 			idx += 1
-
-		# set labels
-		for i,v in enumerate(y):
-			self.Y[i] = v
-			# if v == 1:
-			# 	self.C[i] = cp
-			# elif v== -1:
-			# 	self.C[i] = cn
-			# else:
-			# 	self.C[i] = 1.0
 	def __init__(self):
 		self.__createfrom__ = 'python'
 		self.__frombuffer__ = True
-
-	def dump(self, filename):
-		with open(filename, 'wt') as fout:
-			for j in range(self.m):
-				# write label
-				fout.write('%d\t' % (self.Y[j]))
-
-				# write non-zero indices
-				start_ix = self.rowptr[j]
-				stop_ix = self.rowptr[j+1]
-				for i in range(start_ix, stop_ix-1):
-					fout.write('%d:%2.4f ' % (self.colind[i]+1, self.val[i]))
-					fout.write('\n')
 
 class vector_double(Structure):
 	_names = ['d', 'vec']
