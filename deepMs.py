@@ -759,9 +759,6 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(validation_Features)
             else:
-                # clf = getPercWeights(currIter, kFold)
-                # clf = getPercKimWeights(currIter, kFold)
-                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 clf = l2_svm_mfn.solver(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
@@ -912,7 +909,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     elif method==2:
         isSvm = True
 
-    if not isSvm: # check whether we need to parallelize the SVM grid search
+    if numThreads==1 or not isSvm: # check whether we need to parallelize the SVM grid search
         for kFold, cvBinSids in enumerate(keys):
             # Find training set using q-value analysis
             taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
@@ -930,9 +927,9 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         
             if method == 0:
                 topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
-            # elif method in [1, 2]:
-            #     topScores, bestTaq, bestClf = doSvmGridSearch_threaded(thresh, kFold, features, labels,validation_Features, validation_Labels,
-            #                                                   cposes, cfracs, alpha, tron, currIter, numThreads)
+            elif method in [1, 2]: # helpful to keep this single-threaded SVM implementation in for profiling
+                topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
+                                                              cposes, cfracs, alpha, tron, currIter)
             else:
                 topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
                                                                      validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
@@ -985,7 +982,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
             tp, _, _ = calcQ(newScores[kFold], _mp_data[kFold, 'validation_Y'], thresh)
             bestTaqs[kFold] = len(tp)
             all_AUCs[kFold] = AUC_fn_001(newScores[kFold], _mp_data[kFold, 'validation_Y'] )
-        estTaq = sum(bestTaqs)
+        estTaq = np.sum(bestTaqs)
     estTaq /= 2
     return newScores, estTaq, clfs, np.mean(all_AUCs)
 
