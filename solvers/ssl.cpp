@@ -115,6 +115,7 @@ int CGLS(const struct data *Data,
   double *Y = Data->Y;
   // double *C = Data->C;
   int n  = Data->n;
+  int n1 = n-1;
   double lambda_l = 1.0;
   double *beta = Weights->vec;
   double *o  = Outputs->vec; 
@@ -137,7 +138,8 @@ int CGLS(const struct data *Data,
     ii = J[i];
     z[i] = ((Y[ii]==1)? cpos : cneg) * (Y[ii] - o[ii]);
     rowStart = i * n;
-    memcpy(set2 + rowStart, set + ii*n, sizeof(double)*n);
+    memcpy(set2 + rowStart, set + ii*n1, sizeof(double)*n1);
+    set2[rowStart + n1] = 1;
     daxpy_(&n, &(z[i]), set2 + i*n, &inc, r, &inc);
   }
   double *p = new double[n];   
@@ -284,6 +286,7 @@ int L2_SVM_MFN(const struct data *Data,
   // double *C = Data->C;
   int n  = Data->n;
   int m  = Data->m;
+  int n0 = n-1;
   double lambda_l = 1.0;
   double epsilon = BIG_EPSILON;
   int cgitermax = SMALL_CGITERMAX;
@@ -348,7 +351,8 @@ int L2_SVM_MFN(const struct data *Data,
       for(register int i=active; i < m; i++) 
 	{
 	  ii=ActiveSubset->vec[i];   
-	  o_bar[ii] = ddot_(&n, set + ii*n, &inc, w_bar, &inc);
+	  // o_bar[ii] = ddot_(&n, set + ii*n, &inc, w_bar, &inc);
+	  o_bar[ii] = ddot_(&n0, set + ii*n0, &inc, w_bar, &inc) + w_bar[n0];
 	  // t = w_bar[n - 1];
 	  // for (register int j = n - 1; j--;) {
 	  //   t += set[j + ii * n] * w_bar[j];
@@ -383,10 +387,6 @@ int L2_SVM_MFN(const struct data *Data,
 	    {
 	      memcpy(w, w_bar, sizeof(double)*n);
 	      memcpy(o, o_bar, sizeof(double)*m);
-	      // for(int i=n; i-- ;) 
-	      // 	w[i]=w_bar[i];      
-	      // for(int i=m; i-- ;)
-	      // 	o[i]=o_bar[i]; 
 	      delete[] ActiveSubset->vec;
 	      delete[] ActiveSubset;
 	      delete[] o_bar;

@@ -46,32 +46,13 @@ class data(Structure):
 		self.__frombuffer__ = False
 		# set constants
 		self.m = len(y)
-		self.l = sum(y != 0)
-		self.u = self.m - self.l
+		# self.l = sum(y != 0)
+		# self.u = self.m - self.l
 		self.n = X.shape[1]+1 # include bias term
 
-		# allocate memory
-		self.X = (c_double * (self.n*self.m))()
-		# self.Y = (c_double * self.m)()
+		# Copy data over
 		self.Y = np.ctypeslib.as_ctypes(y.astype(np.float64))
-		# self.C = (c_double * self.m)()
-
-		# assert sizeof(self.Y)*(self.n-1) == X.nbytes, "Ctypes num bytes for feature matrix not equal to np num bytes for feature matrix"
-		# assert sizeof(self.Y) == y.nbytes, "Ctypes num bytes for label vector %d not equal to np num bytes for label vector %d" %(sizeof(self.Y), y.nbytes)
-		# memmove(byref(self.X), X.ctypes.data, X.nbytes)
-		# memmove(byref(self.Y), y.ctypes.data, y.nbytes)
-		# for i,v in enumerate(y):
-		# 	self.Y[i] = v
-
-		idx = 0
-		# copying data
-		for i,v in enumerate(y):
-			# self.Y[i] = v
-			for j in range(self.n-1):
-				self.X[idx] = X[i,j]
-				idx += 1
-			self.X[idx] = 1.
-			idx += 1
+		self.X = np.ctypeslib.as_ctypes(X.reshape(-1))
 	def __init__(self):
 		self.__createfrom__ = 'python'
 		self.__frombuffer__ = True
@@ -172,10 +153,10 @@ def solver(X, y, verbose, **kwargs):
 		if np.prod(y.shape) != y.shape[0]:
 			raise ValueError('y must be a column or row vector')
 
-	# check y
-	labels = set(y)
-	if not (labels == set([1.0,-1.0,0.0])) and not (labels == set([1.0,-1.0])):
-		raise ValueError('label array must contain positive(+1) and negative (-1) samples, and optionally unlabeled ones (0).')
+	# Note: disable check below, assume this is handled in the main PIN parser
+	# # check y
+	# labels = set(y)
+	# assert set(y) == set([1.0,-1.0]), 'label array must contain positive(+1) and negative (-1) samples'
 
 	# check x vs. y
 	if not isinstance(X, np.ndarray):
