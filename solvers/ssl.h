@@ -39,12 +39,9 @@ using namespace std;
 extern "C" struct data 
 {
   int m; /* number of examples */
-  int l; /* number of labeled examples */
-  int u; /* number of unlabeled examples l+u = m */
   int n; /* number of features */ 
   double* X; // flattened dense feature matrix
   double *Y;   /* labels */
-  /* double *C;   /\* cost associated with each example *\/ */
 };
 
 extern "C" struct vector_double /* defines a vector of doubles */
@@ -64,11 +61,11 @@ extern "C" struct vector_int /* defines a vector of ints for index subsets */
 extern "C" struct options 
 {
   /* user options */
-  int algo; /* 1 to 4 for RLS,SVM,TSVM,DASVM */
+  /* int algo; /\* 1 to 4 for RLS,SVM,TSVM,DASVM *\/ */
   double lambda_l; /* regularization parameter */
-  double lambda_u; /* regularization parameter over unlabeled examples */
-  int S; /* maximum number of TSVM switches per fixed-weight label optimization */
-  double R; /* expected fraction of unlabeled examples in positive class */
+  /* double lambda_u; /\* regularization parameter over unlabeled examples *\/ */
+  /* int S; /\* maximum number of TSVM switches per fixed-weight label optimization *\/ */
+  /* double R; /\* expected fraction of unlabeled examples in positive class *\/ */
   double Cp; /* cost for positive examples */
   double Cn; /* cost for negative examples */
   /*  internal optimization options */    

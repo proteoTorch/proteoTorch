@@ -21,15 +21,12 @@ def fillprototype(f, restype, argtypes):
 class data(Structure):
 	'''
 	m: number of examples
-	l: number of labeled examples
-	u: number of unlabeled examples
 	n: number of features
 	X: flattened 2D feature matrix
 	Y: labels
-	C: cost associated with each examples
 	'''
-	_names = ['m', 'l', 'u', 'n', 'X', 'Y', 'C']
-	_types = [c_int, c_int, c_int, c_int, POINTER(c_double), POINTER(c_double), POINTER(c_double) ]
+	_names = ['m', 'n', 'X', 'Y']
+	_types = [c_int, c_int, POINTER(c_double), POINTER(c_double) ]
 	_fields_ = genFields(_names, _types)
 
 	def __str__(self):
@@ -42,12 +39,10 @@ class data(Structure):
 
 		return s
 
-	def from_data(self, X, y, cp = 1., cn = 1.):
+	def from_data(self, X, y):
 		self.__frombuffer__ = False
 		# set constants
 		self.m = len(y)
-		# self.l = sum(y != 0)
-		# self.u = self.m - self.l
 		self.n = X.shape[1]+1 # include bias term
 
 		# Copy data over
@@ -76,28 +71,16 @@ class vector_int(Structure):
 
 
 class options(Structure):
-	_names = ['algo', 'lambda_l', 'lambda_u', 'S', 'R', 'Cp', 'Cn', 'epsilon', 'cgitermax', 'mfnitermax']
-	_types = [c_int, c_double, c_double, c_int, c_double, c_double, c_double, c_double, c_int, c_int]
+	_names = ['lambda_l', 'Cp', 'Cn', 'epsilon', 'cgitermax', 'mfnitermax']
+	_types = [c_double, c_double, c_double, c_double, c_int, c_int]
 	_fields_ = genFields(_names, _types)
 
 	def __init__(self, **kwargs):
 		self.set_defaults()
 
 		if kwargs:
-			if 'algo' in kwargs.keys():
-				self.algo = kwargs['algo']
-
 			if 'lambda_l' in kwargs.keys():
 				self.lambda_l = kwargs['lambda_l']
-
-			if 'lambda_u' in kwargs.keys():
-				self.lambda_u = kwargs['lambda_u']
-
-			if 'S' in kwargs.keys():
-				self.S = kwargs['S']
-
-			if 'R' in kwargs.keys():
-				self.R = kwargs['R']
 
 			if 'Cp' in kwargs.keys():
 				self.Cp = kwargs['Cp']
@@ -115,11 +98,7 @@ class options(Structure):
 				self.mfnitermax = kwargs['mfnitermax']
 
 	def set_defaults(self):
-		self.algo = 1
 		self.lambda_l = 1.0
-		self.lambda_u = 1.0
-		self.S = 10000
-		self.R = 0.5 
 		self.Cp = 1.0 
 		self.Cn = 1.0 
 		self.epsilon = 1e-7
@@ -167,7 +146,7 @@ def solver(X, y, verbose, **kwargs):
 	ssl_data = data()
 	ssl_weights = vector_double()
 	ssl_options = options(**kwargs)
-	ssl_data.from_data(X,y, ssl_options.Cp, ssl_options.Cn)
+	ssl_data.from_data(X,y)
 	ssl_outputs = vector_double()
 	libssl.call_L2_SVM_MFN(ssl_data, ssl_options, ssl_weights, ssl_outputs, verbose, ssl_options.Cp, ssl_options.Cn)
 	
