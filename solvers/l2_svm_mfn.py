@@ -122,6 +122,12 @@ fillprototype(libssl.clear_vec_double, None, [POINTER(vector_double)])
 fillprototype(libssl.clear_vec_int, None, [POINTER(vector_int)])
 
 def solver(X, y, verbose, **kwargs):
+	""" Set up data structures and call optimized L2-SVM-MFN function.  Note that to make the data 
+	transfer of the numpy feature matrix to a flat ctype array as fast as possible, the L2-SVM-MFN 
+	source assumes the bias is not represented as a column of ones in the passed-in feature matrix, 
+	i.e., the bias term is handled separately whenever the passed in feature matrix X (called set 
+	the C++ L2_SVM_MFN function) is directly accessed.
+	"""
 	# check y
 	if not isinstance(y, np.ndarray):
 		if not isinstance(y, list):
