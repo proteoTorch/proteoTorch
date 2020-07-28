@@ -52,13 +52,21 @@ class data(Structure):
 
 		# allocate memory
 		self.X = (c_double * (self.n*self.m))()
-		self.Y = (c_double * self.m)()
+		# self.Y = (c_double * self.m)()
+		self.Y = np.ctypeslib.as_ctypes(y.astype(np.float64))
 		# self.C = (c_double * self.m)()
+
+		# assert sizeof(self.Y)*(self.n-1) == X.nbytes, "Ctypes num bytes for feature matrix not equal to np num bytes for feature matrix"
+		# assert sizeof(self.Y) == y.nbytes, "Ctypes num bytes for label vector %d not equal to np num bytes for label vector %d" %(sizeof(self.Y), y.nbytes)
+		# memmove(byref(self.X), X.ctypes.data, X.nbytes)
+		# memmove(byref(self.Y), y.ctypes.data, y.nbytes)
+		# for i,v in enumerate(y):
+		# 	self.Y[i] = v
 
 		idx = 0
 		# copying data
 		for i,v in enumerate(y):
-			self.Y[i] = v
+			# self.Y[i] = v
 			for j in range(self.n-1):
 				self.X[idx] = X[i,j]
 				idx += 1
