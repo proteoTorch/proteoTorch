@@ -64,22 +64,27 @@ _labelInd=1
 #_indInd=2 # Used to keep track of feature matrix rows when sorting based on score
 
 
-
 #########################################################
 #########################################################
 ################### CV-bin score normalization
 #########################################################
 #########################################################
-def doMergeScores(thresh, testSets, scores, Y):
+def doMergeScores(thresh, testSets, scores, Y, isSvm = False):
     # record new scores as we go
     newScores = np.zeros(scores.shape)
-    for testSids in testSets:
-#        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
-#        diff = u - d
-#        if diff <= 0.:
-#            diff = 1.
-        for ts in testSids:
-            newScores[ts] = scores[ts] #(scores[ts] - u) / (u-d)
+    if not isSvm:
+        for testSids in testSets:
+            for ts in testSids:
+                newScores[ts] = scores[ts]
+    else:
+        for testSids in testSets:
+            u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+            diff = u - d
+            if diff <= 0.:
+                diff = 1.
+            for ts in testSids:
+                newScores[ts] = (scores[ts] - u) / (u-d)
+
     return newScores
 
 
@@ -1009,6 +1014,11 @@ def mainIter(hyperparams):
             output_dir = output_dir + '/'
     mini_utils.mkdir(output_dir)
     q = hyperparams['q']
+    
+    isSvm = False
+    if hyperparams['method'] in [1,2]:
+        isSvm = True
+
     # target_rows: dictionary mapping target sids to rows in the feature matrix
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
     # X: standard-normalized feature matrix
@@ -1022,8 +1032,6 @@ def mainIter(hyperparams):
     if _debug and _verb >= 3:
         print(featureNames)
     trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
-    # t_scores = {}
-    # d_scores = {}
     initTaq = 0.
     initDir = hyperparams['initDirection']
     if initDir > -1 and initDir < m:
@@ -1086,7 +1094,7 @@ def mainIter(hyperparams):
         # write output for iteration
         isSvmlin = (hyperparams['method']==2)
         testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
-        testScores = doMergeScores(q, testKeys, testScores, Y)
+        testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
         taq, _, qs = calcQ(testScores, Y, q, False)
         if not _identOutput:
             writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
@@ -1097,7 +1105,7 @@ def mainIter(hyperparams):
     testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
     print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
     if _mergescore:
-        scores = doMergeScores(q, testKeys, testScores, Y)
+        scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
     mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))
