@@ -881,7 +881,9 @@ def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
 ################### Main training functions
 #########################################################
 #########################################################
-def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1, dnn_hyperparams={}, prev_iter_models=[], numThreads = 1):
+def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1, 
+           dnn_hyperparams={}, prev_iter_models=[], numThreads = 1,
+           previousMethod = -1):
     """ Train a classifier on CV bins.
         Method 0: LDA
         Method 1: linear SVM, solver TRON
@@ -934,8 +936,14 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
             #     topScores, bestTaq, bestClf = doSvmGridSearch_threaded(thresh, kFold, features, labels,validation_Features, validation_Labels,
             #                                                   cposes, cfracs, alpha, tron, currIter, numThreads)
             else:
-                topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                                     validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
+                if previousMethod != 3:
+                    topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
+                                                                         validation_Labels, hparams=dnn_hyperparams, model = None)
+                else:
+                    topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
+                                                                         validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
+                # topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
+                #                                                      validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
             all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
             newScores.append(topScores)
             clfs.append(bestClf)
@@ -998,6 +1006,9 @@ def mainIter(hyperparams):
     _seed=hyperparams['seed']
     _verb=hyperparams['verbose']
 
+    prevMethod=-1
+    ms = [int(i) for i in hyperparams['methods'].split(',')]
+
     if hyperparams['method']==2 and not svmlinReady:
         print("Selected method 2, SVM learning with L2-SVM-MFN,")
         print("but this solver could be found.  Please build this solver")
@@ -1044,6 +1055,11 @@ def mainIter(hyperparams):
     fpoo = 0 # number of identifications from previous, previous iteration
     trained_models = []
     for i in range(hyperparams['maxIters']):
+        hyperparams['method'] = ms[i]
+        if ms[i] == 3:
+            q = hyperparams['deepq']
+        # else:
+        #     q = hyperparams['q']
         # if i < 5:
         #     q = hyperparams['q']
         #     # hyperparams['q'] = 0.02
@@ -1081,7 +1097,8 @@ def mainIter(hyperparams):
 
         scores, fp, trained_models, validation_AUC = doIter(
             q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
-            dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'])
+            dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'], 
+            previousMethod = prevMethod)
         print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
             print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
@@ -1120,6 +1137,7 @@ if __name__ == '__main__':
 
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--deepq', type = 'float', action= 'store', default = 0.05)
     parser.add_option('--q2', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--q3', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--q4', type = 'float', action= 'store', default = 0.01)
@@ -1131,6 +1149,8 @@ if __name__ == '__main__':
     parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
     parser.add_option('--method', type = 'int', action= 'store', default = 3, 
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
+    parser.add_option('--methods', type = 'string', action= 'store', default = '3', 
+                      help = 'String binding which method to run at which iteration.  See method input for more info about available methods.')
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 1, help='number of iterations; runs on multiple splits per iterations.') #4
     parser.add_option('--pin', type = 'string', action= 'store', help='input file with *.pin format')
     parser.add_option('--output_dir', type = 'string', action= 'store', default=None, help='Defaults to model_output/<data_file_name>/<time_stamp>/')
@@ -1157,7 +1177,7 @@ if __name__ == '__main__':
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
-    parser.add_option('--dnn_train_qtol2', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
+    # parser.add_option('--dnn_train_qtol2', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
     parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
     parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 1.5, help='Multiplicative factor to weight false positives')
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'sgd', help='DNN solver to use.')
