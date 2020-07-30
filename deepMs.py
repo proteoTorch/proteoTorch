@@ -64,22 +64,27 @@ _labelInd=1
 #_indInd=2 # Used to keep track of feature matrix rows when sorting based on score
 
 
-
 #########################################################
 #########################################################
 ################### CV-bin score normalization
 #########################################################
 #########################################################
-def doMergeScores(thresh, testSets, scores, Y):
+def doMergeScores(thresh, testSets, scores, Y, isSvm = False):
     # record new scores as we go
     newScores = np.zeros(scores.shape)
-    for testSids in testSets:
-#        u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
-#        diff = u - d
-#        if diff <= 0.:
-#            diff = 1.
-        for ts in testSids:
-            newScores[ts] = scores[ts] #(scores[ts] - u) / (u-d)
+    if not isSvm:
+        for testSids in testSets:
+            for ts in testSids:
+                newScores[ts] = scores[ts]
+    else:
+        for testSids in testSets:
+            u, d = qMedianDecoyScore(scores[testSids], Y[testSids], thresh)
+            diff = u - d
+            if diff <= 0.:
+                diff = 1.
+            for ts in testSids:
+                newScores[ts] = (scores[ts] - u) / (u-d)
+
     return newScores
 
 
@@ -759,9 +764,6 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
                 clf.fit(features, labels)
                 validation_scores = clf.decision_function(validation_Features)
             else:
-                # clf = getPercWeights(currIter, kFold)
-                # clf = getPercKimWeights(currIter, kFold)
-                # clf = svmlin.ssl_train_with_data(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 clf = l2_svm_mfn.solver(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
                 validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
             tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
@@ -914,7 +916,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     elif method==2:
         isSvm = True
 
-    if not isSvm: # check whether we need to parallelize the SVM grid search
+    if numThreads==1 or not isSvm: # check whether we need to parallelize the SVM grid search
         for kFold, cvBinSids in enumerate(keys):
             # Find training set using q-value analysis
             taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
@@ -932,9 +934,9 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
         
             if method == 0:
                 topScores, bestTaq, bestClf = doLdaSingleFold(thresh, kFold, features, labels, validation_Features, validation_Labels)
-            # elif method in [1, 2]:
-            #     topScores, bestTaq, bestClf = doSvmGridSearch_threaded(thresh, kFold, features, labels,validation_Features, validation_Labels,
-            #                                                   cposes, cfracs, alpha, tron, currIter, numThreads)
+            elif method in [1, 2]: # helpful to keep this single-threaded SVM implementation in for profiling
+                topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
+                                                              cposes, cfracs, alpha, tron, currIter)
             else:
                 if previousMethod != 3:
                     topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
@@ -993,7 +995,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
             tp, _, _ = calcQ(newScores[kFold], _mp_data[kFold, 'validation_Y'], thresh)
             bestTaqs[kFold] = len(tp)
             all_AUCs[kFold] = AUC_fn_001(newScores[kFold], _mp_data[kFold, 'validation_Y'] )
-        estTaq = sum(bestTaqs)
+        estTaq = np.sum(bestTaqs)
     estTaq /= 2
     return newScores, estTaq, clfs, np.mean(all_AUCs)
 
@@ -1023,6 +1025,11 @@ def mainIter(hyperparams):
             output_dir = output_dir + '/'
     mini_utils.mkdir(output_dir)
     q = hyperparams['q']
+    
+    isSvm = False
+    if hyperparams['method'] in [1,2]:
+        isSvm = True
+
     # target_rows: dictionary mapping target sids to rows in the feature matrix
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
     # X: standard-normalized feature matrix
@@ -1030,17 +1037,12 @@ def mainIter(hyperparams):
     pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(hyperparams['pin'])
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
-#    print('not normalizing the data!')
-#    X = dnn_code.preprocess_data(X)
-    # n = l[0] # number of instances
     m = l[1] # number of features
     targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
     print("Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio))
     if _debug and _verb >= 3:
         print(featureNames)
     trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
-    # t_scores = {}
-    # d_scores = {}
     initTaq = 0.
     initDir = hyperparams['initDirection']
     if initDir > -1 and initDir < m:
@@ -1109,7 +1111,7 @@ def mainIter(hyperparams):
         # write output for iteration
         isSvmlin = (hyperparams['method']==2)
         testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
-        testScores = doMergeScores(q, testKeys, testScores, Y)
+        testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
         taq, _, qs = calcQ(testScores, Y, q, False)
         if not _identOutput:
             writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
@@ -1120,7 +1122,7 @@ def mainIter(hyperparams):
     testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
     print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
     if _mergescore:
-        scores = doMergeScores(q, testKeys, testScores, Y)
+        scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
     mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))

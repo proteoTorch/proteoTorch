@@ -39,12 +39,9 @@ using namespace std;
 extern "C" struct data 
 {
   int m; /* number of examples */
-  int l; /* number of labeled examples */
-  int u; /* number of unlabeled examples l+u = m */
   int n; /* number of features */ 
   double* X; // flattened dense feature matrix
   double *Y;   /* labels */
-  double *C;   /* cost associated with each example */
 };
 
 extern "C" struct vector_double /* defines a vector of doubles */
@@ -64,11 +61,11 @@ extern "C" struct vector_int /* defines a vector of ints for index subsets */
 extern "C" struct options 
 {
   /* user options */
-  int algo; /* 1 to 4 for RLS,SVM,TSVM,DASVM */
+  /* int algo; /\* 1 to 4 for RLS,SVM,TSVM,DASVM *\/ */
   double lambda_l; /* regularization parameter */
-  double lambda_u; /* regularization parameter over unlabeled examples */
-  int S; /* maximum number of TSVM switches per fixed-weight label optimization */
-  double R; /* expected fraction of unlabeled examples in positive class */
+  /* double lambda_u; /\* regularization parameter over unlabeled examples *\/ */
+  /* int S; /\* maximum number of TSVM switches per fixed-weight label optimization *\/ */
+  /* double R; /\* expected fraction of unlabeled examples in positive class *\/ */
   double Cp; /* cost for positive examples */
   double Cn; /* cost for negative examples */
   /*  internal optimization options */    
@@ -116,7 +113,7 @@ extern "C" void call_L2_SVM_MFN(struct data *Data,
 				struct options *Options,
 				struct vector_double *W, /* weight vector */
 				struct vector_double *O,
-				int verbose); /* output vector */
+				int verbose, double cpos, double cneg); /* output vector */
 
 /* svmlin algorithms and their subroutines */
  
@@ -129,7 +126,7 @@ int CGLS(const struct data *Data,
 	 const struct vector_int *Subset,
 	 struct vector_double *Weights,
 	 struct vector_double *Outputs,
-	 int verbose);
+	 int verbose, double cpos, double cneg);
 
 /* Linear Modified Finite Newton L2-SVM*/
 /* Solves: min_w 0.5*Options->lamda*w'*w + 0.5*sum_i Data->C[i] max(0,1 - Y[i] w' x_i)^2 */
@@ -137,11 +134,11 @@ int L2_SVM_MFN(const struct data *Data,
 	       struct options *Options, 
 	       struct vector_double *Weights,
 	       struct vector_double *Outputs,
-	       int verbose); /* use ini=0 if no good starting guess for Weights, else 1 */
+	       int verbose,  double cpos, double cneg); /* use ini=0 if no good starting guess for Weights, else 1 */
 double line_search(double *w, double *w_bar,
 		   double lambda,
 		   double *o, double *o_bar, 
-		   double *Y, double *C, int d, int l);
+		   double *Y, int d, int l, double cpos, double cneg);
 
 
 #endif
