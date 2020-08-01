@@ -320,7 +320,14 @@ def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCur
         scores, labels = load_percolator_target_decoy_files(filenames, scoreKey)
     else:
         raise ValueError('Number of filenames supplied for a single method was > 2, exitting.\n')
-    qs, ps = calcQAndNumIdentified(scores, labels)
+    # Check scores multiplied by both 1 and positive -1
+    taq, _, _ = calcQ(scores, labels, qTol, False)
+    taq2, _, _ = calcQ([-1. * s for s in scores], labels, qTol, False)
+
+    if(len(taq)>len(taq2)):
+        qs, ps = calcQAndNumIdentified(scores, labels)
+    else:
+        qs, ps = calcQAndNumIdentified([-1. * s for s in scores], labels)
     numIdentifiedAtQ = 0
     quac = []
     den = float(len(scores))
@@ -336,7 +343,7 @@ def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCur
     # set AUC weights to uniform 
     auc = np.trapz(quac)#/len(quac)#/quac[-1]
     if qTol > qCurveCheck:
-        auc = 0.3 * auc + 0.7 * np.trapz(quac[:ind0])#/ind0#/quac[ind0-1]
+        auc = 0.3 * auc + 0.7 * np.trapz(quac)#/ind0#/quac[ind0-1]
     return qs, ps, auc
 
 
