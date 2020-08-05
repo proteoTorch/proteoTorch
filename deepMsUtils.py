@@ -38,11 +38,6 @@ def calcDistanceMat(testMat,trainMat, metric = 'euclidean'):
     """ Distance/similarity metrics: ‘braycurtis’, ‘canberra’, ‘chebyshev’, ‘cityblock’, ‘correlation’, ‘cosine’, ‘dice’, ‘euclidean’, ‘hamming’, ‘jaccard’, ‘jensenshannon’, ‘kulsinski’, ‘mahalanobis’, ‘matching’, ‘minkowski’, ‘rogerstanimoto’, ‘russellrao’, ‘seuclidean’, ‘sokalmichener’, ‘sokalsneath’, ‘sqeuclidean’, ‘wminkowski’, ‘yule’.
     """
     z = distance.cdist(testMat, trainMat, metric)
-    # l0 = (testMat.shape)[0]
-    # l1 = (trainMat.shape)[0]
-    # z = np.empty([l0,l1])
-    # for i,x in enumerate(testMat):
-    #     z[i] = np.linalg.norm(x-trainMat, axis=1)
     return z
 
 def doRand():
@@ -220,6 +215,51 @@ def load_percolator_target_decoy_files(filenames, scoreKey = "score", maxPerSid 
     labels = [1]*len(targets) + [-1]*len(decoys)
     return scores, labels
 
+def load_percolator_target_decoy_files_tdc(filenames, scoreKey = "score", maxPerSid = False,
+                                           targetString = 'target', decoyString = 'decoy'):
+    """ filenames - list of percolator tab delimited target and decoy files
+    header:
+    (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
+    Output:
+    List of scores
+    """
+    # Load target and decoy PSMs
+    targets, tids = load_percolator_output(filenames[0], scoreKey, maxPerSid)
+    decoys, dids = load_percolator_output(filenames[1], scoreKey, maxPerSid)
+    allScores = {}
+    targetCheck = set([]) # check whether both a target and decoy were supplied
+    decoyCheck = set([])
+    for t,tid in zip(targets,tids):
+        psmid = tid.split(targetString)[1]
+        if psmid in allScores:
+            allScores[psmid].append((t,1))
+        else:
+            allScores[psmid] = [(t,1)]
+            targetCheck.add(psmid)
+
+    for d,did in zip(decoys,dids):
+        psmid = did.split(decoyString)[1]
+        if psmid in allScores:
+            allScores[psmid].append((d,-1))
+            decoyCheck.add(psmid)
+        else:
+            allScores[psmid] = [(d,-1)]
+            decoyCheck.add(psmid)
+
+    print(len(decoyCheck), len(targetCheck), len(allScores))
+    scores = []
+    labels = []
+    for psmid in allScores:
+        if psmid in targetCheck and psmid in decoyCheck:
+            s,l = max(allScores[psmid]) # , key = lambda r: r[0])
+            scores.append(s)
+            labels.append(l)
+    print("Read %d scores" % (len(scores)))
+    # scores = targets + decoys
+    # labels = [1]*len(targets) + [-1]*len(decoys)
+        
+    return scores, labels
+
 
 def refine(scorelists, tdc = True):
     """Create a list of method scores which contain only shared spectra.
@@ -309,15 +349,74 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
     print("Read %d scores" % (lineNum-1))
     return scores, labels, ids
 
+def load_pin_scores_tdc(filename, scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+                        targetString = 'target', decoyString = 'decoy'):
+    allScores = {}
+    targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+    decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+
+    lineNum = 0
+    with open(filename, 'r') as f:
+        for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
+            lineNum += 1
+            # todo: add try excepts to the below
+            s = float(l[scoreKey])
+            label = int(l[labelKey])
+            # make sure idKey is valid
+            if idKey in l:
+                psmid = l[idKey]
+            else:
+                if 'SpecId' in l:
+                    idKey = 'SpecId'
+                    psmid = l[idKey]
+                else:
+                    raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
+                    exit(-1)
+
+            if label == 1:
+                psmid = psmid.split(targetString)[1]
+                if psmid in allScores:
+                    allScores[psmid].append((s,1))
+                else:
+                    allScores[psmid] = [(s,1)]
+                    targetCheck.add(psmid)
+            elif label == -1:
+                psmid = psmid.split(decoyString)[1]
+                if psmid in allScores:
+                    allScores[psmid].append((s,-1))
+                    decoyCheck.add(psmid)
+                else:
+                    allScores[psmid] = [(s,-1)]
+                    decoyCheck.add(psmid)
+            else:
+                raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
+    print("Read %d scores" % (lineNum-1))
+    # Perform the competition
+    scores = []
+    labels = []
+    ids = []
+    for psmid in allScores:
+        if psmid in targetCheck and psmid in decoyCheck:
+            s,l = max(allScores[psmid], key = lambda r: r[0])
+            scores.append(s)
+            labels.append(l)
+            ids.append(psmid)
+    return scores, labels, ids
 
 
-def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCurveCheck = 0.001):
+def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCurveCheck = 0.001, tdc = False):
     """ Load all PSMs and features file
     """
     if len(filenames)==1:
-        scores, labels, _ = load_pin_scores(filenames[0], scoreKey)
+        if tdc:
+            scores, labels, _ = load_pin_scores_tdc(filenames[0], scoreKey)
+        else:
+            scores, labels, _ = load_pin_scores(filenames[0], scoreKey)
     elif len(filenames)==2: # Assume these are Percolator results, where target is specified followed by decoy
-        scores, labels = load_percolator_target_decoy_files(filenames, scoreKey)
+        if tdc:
+            scores, labels = load_percolator_target_decoy_files_tdc(filenames, scoreKey)
+        else:
+            scores, labels = load_percolator_target_decoy_files(filenames, scoreKey)
     else:
         raise ValueError('Number of filenames supplied for a single method was > 2, exitting.\n')
     # Check scores multiplied by both 1 and positive -1
@@ -632,7 +731,7 @@ def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
                               color = 'b')
         pylab.savefig('%s' % output)
 
-def main(args, output, maxq):
+def main(args, output, maxq, doTdc = False):
     '''
     input:
         
@@ -644,10 +743,10 @@ def main(args, output, maxq):
     '''
     methods = []
     scorelists = []
-    def process(arg, silent = False):
+    def process(arg):
         desc, scoreKey, fn = parse_arg(arg)
         methods.append(desc)
-        qs, ps, auc = load_test_scores(fn, scoreKey)
+        qs, ps, auc = load_test_scores(fn, scoreKey, tdc = doTdc)
         scorelists.append( (qs, ps) )
         print ('%s: %d identifications, AUC = %f' % (desc, len(qs), auc))
     for argument in args:
@@ -668,10 +767,11 @@ if __name__ == '__main__':
     parser = optparse.OptionParser(usage = usage, description = desc)
     parser.add_option('--output', type = 'string', default='figure.png', help = 'Output file name where the figure will be stored.')
     parser.add_option('--maxq', type = 'float', default = 1.0, help = 'Maximum q-value to plot to: 0 < q <= 1.0')
+    parser.add_option('--tdc', action = "store_true", help = 'Perform target-decoy competition')
 #    parser.add_option('--is_perc', type = 'int', default = 0, help = 'Bool: pass "1" if using this script on percolator output, otherwise 0.')
 
     (OPTIONS, ARGS) = parser.parse_args()
 
     assert len(ARGS) >= 1, 'No identification and model output files listed.'
-    main(ARGS, OPTIONS.output, OPTIONS.maxq)
+    main(ARGS, OPTIONS.output, OPTIONS.maxq, OPTIONS.tdc)
     
