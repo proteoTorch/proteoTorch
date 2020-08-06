@@ -437,9 +437,10 @@ def psmId_diffs(inputPin, percFiles, pinFile, percScoreKey = 'score', pinScoreKe
     print("%d ids in %s,%s not in %s:" % (len(percScans - pinScans), percFiles[0], percFiles[1], pinFile))
     for sid in percScans - pinScans:
         print("%d" % (sid))
-    # print("Ids in %s not in %s,%s:" % (pinFile, percFiles[0], percFiles[1]))
-    # for psmid in pinIds - percIds:
-    #     print("%s" % psmid)
+
+    print("%d ids in %s not in %s,%s:" % (len(pinScans - percScans), pinFile, percFiles[0], percFiles[1]))
+    for sid in pinScans - percScans:
+        print("%d" % (sid))
     
 
 def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001, tdc = False):
