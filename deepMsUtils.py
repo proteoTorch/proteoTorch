@@ -216,8 +216,67 @@ def load_percolator_target_decoy_files(filenames, scoreKey = "score", maxPerSid 
     labels = [1]*len(targets) + [-1]*len(decoys)
     return scores, labels, ids
 
-def load_percolator_target_decoy_files_tdc(filenames, scoreKey = "score", maxPerSid = False,
-                                           targetString = 'target', decoyString = 'decoy'):
+def load_percolator_target_decoy_files_tdc(filenames,  mapIdToScanMass, mapScanMassToId,
+                                           scoreKey = "score", maxPerSid = False,
+                                           writeOutput = False, outputDirectory = None, 
+                                           percolatorTdcFile = 'percolatorTdc.txt'):
+    """ filenames - list of percolator tab delimited target and decoy files
+    header:
+    (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
+    Output:
+    List of scores
+    """
+    # Load target and decoy PSMs
+    targets, tids = load_percolator_output(filenames[0], scoreKey, maxPerSid)
+    decoys, dids = load_percolator_output(filenames[1], scoreKey, maxPerSid)
+    allScores = {}
+    targetCheck = set([]) # check whether both a target and decoy were supplied
+    decoyCheck = set([])
+    for t,tid in zip(targets,tids):
+        scanMassPair = mapIdToScanMass[tid]
+        if scanMassPair in allScores:
+            allScores[scanMassPair].append((t,1))
+        else:
+            allScores[scanMassPair] = [(t,1)]
+            targetCheck.add(scanMassPair)
+
+    for d,did in zip(decoys,dids):
+        scanMassPair = mapIdToScanMass[did]
+        decoyCheck.add(scanMassPair)
+        if scanMassPair in allScores:
+            allScores[scanMassPair].append((d,-1))
+        else:
+            allScores[scanMassPair] = [(d,-1)]
+
+    print(len(decoyCheck), len(targetCheck), len(allScores))
+    scores = []
+    labels = []
+    if writeOutput: # Write new output file, avoid rerunning tdc post-processing
+        if not outputDirectory: # no output directory specified, just skip writing
+            print("Write tdc output selected but no output directory specified, moving on without writing.")
+            writeOutput = False
+        else:
+            if not os.path.exists(outputDirectory):
+                os.makedirs(outputDirectory)
+            # Use same filename, place in new directory
+            fid = open(os.path.join(outputDirectory, percolatorTdcFile), 'w')
+            fid.write("%s\t%s\t%s\n" % ('PSMId', 'score', 'label'))
+
+    for scanMassPair in allScores:
+        if scanMassPair in targetCheck and scanMassPair in decoyCheck:
+            s,l = max(allScores[scanMassPair])
+            scores.append(s)
+            labels.append(l)
+            psmid = mapScanMassToId[scanMassPair]
+            if writeOutput:
+                fid.write("%s\t%f\t%d\n" % (psmid, s, l))
+    if writeOutput:
+        fid.close()
+    print("Read %d scores" % (len(scores)))
+    return scores, labels
+
+def load_percolator_target_decoy_files_tdc_crux(filenames, scoreKey = "score", maxPerSid = False,
+                                                targetString = 'target', decoyString = 'decoy'):
     """ filenames - list of percolator tab delimited target and decoy files
     header:
     (1)PSMId (2)score (3)q-value (4)posterior_error_prob (5)peptide (6)proteinIds
@@ -283,8 +342,6 @@ def parse_arg(argument):
             fns.append(fn)
         return (label, scoreKey, fns)
 
-
-
 def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "PSMId"):
     scores = []
     labels = []
@@ -307,8 +364,76 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
     print("Read %d scores" % (lineNum-1))
     return scores, labels, ids
 
-def load_pin_scores_tdc(filename, scoreKey = "score", labelKey = "Label", idKey = "PSMId",
-                        targetString = 'target', decoyString = 'decoy'):
+def load_pin_scores_tdc(filename, mapIdToScanMass, mapScanMassToId,
+                        scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+                        writeOutput = False, outputDirectory = None):
+    allScores = {}
+    targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+    decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+
+    lineNum = 0
+    with open(filename, 'r') as f:
+        for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
+            lineNum += 1
+            # todo: add try excepts to the below
+            s = float(l[scoreKey])
+            label = int(l[labelKey])
+            # make sure idKey is valid
+            if idKey in l:
+                psmid = l[idKey]
+            else:
+                if 'SpecId' in l:
+                    idKey = 'SpecId'
+                    psmid = l[idKey]
+                else:
+                    raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
+                    exit(-1)
+
+            scanMassPair = mapIdToScanMass[psmid]
+            if label == 1:
+                targetCheck.add(scanMassPair)
+                if scanMassPair in allScores:
+                    allScores[scanMassPair].append((s,1))
+                else:
+                    allScores[scanMassPair] = [(s,1)]
+            elif label == -1:
+                decoyCheck.add(scanMassPair)
+                if scanMassPair in allScores:
+                    allScores[scanMassPair].append((s,-1))
+                else:
+                    allScores[scanMassPair] = [(s,-1)]
+            else:
+                raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
+    print("Read %d scores" % (lineNum-1))
+    # Perform the competition
+    scores = []
+    labels = []
+    ids = []
+    if writeOutput: # Write new output file, avoid rerunning tdc post-processing
+        if not outputDirectory: # no output directory specified, just skip writing
+            print("Write tdc output selected but no output directory specified, moving on without writing.")
+            writeOutput = False
+        else:
+            if not os.path.exists(outputDirectory):
+                os.makedirs(outputDirectory)
+            # Use same filename, place in new directory
+            fid = open(os.path.join(outputDirectory, os.path.basename(filename)), 'w')
+            fid.write("%s\t%s\t%s\n" % (idKey, scoreKey, labelKey))
+    for scanMassPair in allScores:
+        if scanMassPair in targetCheck and scanMassPair in decoyCheck:
+            s,l = max(allScores[scanMassPair], key = lambda r: r[0])
+            psmid = mapScanMassToId[scanMassPair]
+            scores.append(s)
+            labels.append(l)
+            ids.append(psmid)
+            if writeOutput:
+                fid.write("%s\t%f\t%d\n" % (psmid, s, l))
+    if writeOutput:
+        fid.close()
+    return scores, labels, ids
+
+def load_pin_scores_tdc_crux(filename, scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+                             targetString = 'target', decoyString = 'decoy'):
     allScores = {}
     targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
     decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
@@ -365,6 +490,8 @@ def postprocess_results_tdcOrMixmax(pinfile, ptDirectory, outputDirectory,
                                     scoreKey = "score", labelKey = "Label", idKey = "PSMId"):
     """ Post-process proteoTorch results to either compute target-decoy competition or (todo) mix-max method
         for q-value esimtation
+
+        todo: add mixmax procedure
     """
 
     pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(pinfile, normalize = False)
@@ -443,17 +570,21 @@ def psmId_diffs(inputPin, percFiles, pinFile, percScoreKey = 'score', pinScoreKe
         print("%d" % (sid))
     
 
-def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001, tdc = False):
+def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001, 
+                     tdc = False, psmIdToScanMass = {}, scanMassTopsmId = {},
+                     writeTdc = False, tdcDir = ''):
     """ Load all PSMs and features file
     """
     if len(filenames)==1:
         if tdc:
-            scores, labels, _ = load_pin_scores_tdc(filenames[0], scoreKey)
+            scores, labels, _ = load_pin_scores_tdc(filenames[0], psmIdToScanMass, scanMassTopsmId, scoreKey,
+                                                    writeOutput = writeTdc, outputDirectory = tdcDir)
         else:
             scores, labels, _ = load_pin_scores(filenames[0], scoreKey)
     elif len(filenames)==2: # Assume these are Percolator results, where target is specified followed by decoy
         if tdc:
-            scores, labels = load_percolator_target_decoy_files_tdc(filenames, scoreKey)
+            scores, labels = load_percolator_target_decoy_files_tdc(filenames, psmIdToScanMass, scanMassTopsmId, scoreKey,
+                                                                    writeOutput = writeTdc, outputDirectory = tdcDir)
         else:
             scores, labels, _ = load_percolator_target_decoy_files(filenames, scoreKey)
     else:
@@ -770,7 +901,7 @@ def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
                               color = 'b')
         pylab.savefig('%s' % output)
 
-def main(args, output, maxq, doTdc = False):
+def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = False, tdcOutputDir = ''):
     '''
     input:
         
@@ -782,10 +913,26 @@ def main(args, output, maxq, doTdc = False):
     '''
     methods = []
     scorelists = []
+    if doTdc and not dataset:
+        raise Exception('TDC post-processing selected, but analyzed PIN not supplied.  Exitting')
+
+    mapIdToScanMass = {}
+    mapScanMassToId = {}
+    if doTdc:
+        # Note: (scannr, expmass) pairs are used to determine PSMs for target-decoy competition
+        pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(dataset, normalize = False)
+        # determine mapping from PSMId/SpecId to (scannr, expmass)
+        for p, s, em in zip(pepstrings,sids,expMasses):
+            psmId = p[0]
+            mapIdToScanMass[psmId] = (s,em)
+            mapScanMassToId[(s,em)] = psmId
+        
     def process(arg):
         desc, scoreKey, fn = parse_arg(arg)
         methods.append(desc)
-        qs, ps, auc = load_test_scores(fn, scoreKey, tdc = doTdc)
+        qs, ps, auc = load_test_scores(fn, scoreKey, tdc = doTdc, 
+                                       psmIdToScanMass = mapIdToScanMass, scanMassTopsmId = mapScanMassToId,
+                                       writeTdc = writeTdcResults, tdcDir = tdcOutputDir)
         scorelists.append( (qs, ps) )
         print ('%s: %d identifications, AUC = %f' % (desc, len(qs), auc))
     for argument in args:
@@ -806,10 +953,13 @@ if __name__ == '__main__':
     parser.add_option('--output', type = 'string', default='figure.png', help = 'Output file name where the figure will be stored.')
     parser.add_option('--maxq', type = 'float', default = 1.0, help = 'Maximum q-value to plot to: 0 < q <= 1.0')
     parser.add_option('--tdc', action = "store_true", help = 'Perform target-decoy competition')
-#    parser.add_option('--is_perc', type = 'int', default = 0, help = 'Bool: pass "1" if using this script on percolator output, otherwise 0.')
+    parser.add_option('--dataset', type = 'string', help = 'Original processed dataset in PIN format.  Only necessary if tdc or mixmax set to True.')
+    parser.add_option('--writeTdcResults', action = "store_true", help = 'Write the results of TDC for all methods to new files.')
+    parser.add_option('--tdcOutputDir', type = 'string', default = '', help = 'Output directory to write TDC competition results.')
 
     (OPTIONS, ARGS) = parser.parse_args()
 
     assert len(ARGS) >= 1, 'No identification and model output files listed.'
-    main(ARGS, OPTIONS.output, OPTIONS.maxq, OPTIONS.tdc)
+    main(ARGS, OPTIONS.output, OPTIONS.maxq, OPTIONS.tdc, OPTIONS.dataset, 
+         OPTIONS.writeTdcResults, OPTIONS.tdcOutputDir)
     
