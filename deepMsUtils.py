@@ -209,11 +209,12 @@ def load_percolator_target_decoy_files(filenames, scoreKey = "score", maxPerSid 
     List of scores
     """
     # Load target and decoy PSMs
-    targets, _ = load_percolator_output(filenames[0], scoreKey, maxPerSid)
-    decoys, _ = load_percolator_output(filenames[1], scoreKey, maxPerSid)
+    targets, tids = load_percolator_output(filenames[0], scoreKey, maxPerSid)
+    decoys, dids = load_percolator_output(filenames[1], scoreKey, maxPerSid)
     scores = targets + decoys
+    ids = tids + dids
     labels = [1]*len(targets) + [-1]*len(decoys)
-    return scores, labels
+    return scores, labels, ids
 
 def load_percolator_target_decoy_files_tdc(filenames, scoreKey = "score", maxPerSid = False,
                                            targetString = 'target', decoyString = 'decoy'):
@@ -255,50 +256,7 @@ def load_percolator_target_decoy_files_tdc(filenames, scoreKey = "score", maxPer
             scores.append(s)
             labels.append(l)
     print("Read %d scores" % (len(scores)))
-    # scores = targets + decoys
-    # labels = [1]*len(targets) + [-1]*len(decoys)
-        
     return scores, labels
-
-
-def refine(scorelists, tdc = True):
-    """Create a list of method scores which contain only shared spectra.
-
-    Arguments:
-       scorelists: List of [(targets,decoys)] pairs, where each of targets
-           and decoys is itself an iterable of (sid, peptide, score) records.
-           Each method is represented by a (targets,decoys) pair.
-
-    Returns:
-       newscorelists: List of [(targets,decoys)] pairs, where each of targets
-           and decoys is a list of scores for the spectra that are scored in
-           all of the methods.
-    """
-    # Find the sids common to all the methods.
-    sids = [ ]
-    for targets, decoys in scorelists:
-        sids.append(set(r[0] for r in targets) & set(r[0] for r in decoys))
-    final = sids[0]
-    for ids in sids[1:]:
-        final = final & ids
-    # Filter the (sid, peptide, score) records to include those in sids.
-    newscorelists = [ ]
-    pred = lambda r: r[0] in final
-    for targets, decoys in scorelists:
-        if tdc:
-            newtargets = [] 
-            newdecoys = []
-            for t,d in zip(sorted(list(itertools.ifilter(pred, targets))),sorted(list(itertools.ifilter(pred, decoys)))):
-                if t[2] > d[2]:
-                    newtargets.append(t)
-                else:
-                    newdecoys.append(d)
-        else:
-            newtargets = list(itertools.ifilter(pred, targets))
-            newdecoys = list(itertools.ifilter(pred, decoys))
-        newscorelists.append( (list(r[2] for r in newtargets),
-                               list(r[2] for r in newdecoys)) )
-    return newscorelists
 
 
 def parse_arg(argument):
@@ -403,8 +361,88 @@ def load_pin_scores_tdc(filename, scoreKey = "score", labelKey = "Label", idKey 
             ids.append(psmid)
     return scores, labels, ids
 
+def postprocess_results_tdcOrMixmax(pinfile, ptDirectory, outputDirectory,
+                                    scoreKey = "score", labelKey = "Label", idKey = "PSMId"):
+    """ Post-process proteoTorch results to either compute target-decoy competition or (todo) mix-max method
+        for q-value esimtation
+    """
 
-def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCurveCheck = 0.001, tdc = False):
+    pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(pinfile, normalize = False)
+    # determine mapping from PSMId/SpecId to (scannr, expmass)
+    mapIdToScanMass = {}
+    mapScanMassToId = {}
+    for p, s, em in zip(pepstrings,sids,expMasses):
+        psmId = p[0]
+        mapIdToScanMass[psmId] = (s,em)
+        mapScanMassToId[(s,em)] = psmId
+    print("%d unique Sids, %d unique exp masses" % (len(set(sids)), len(set(expMasses))))
+    if not os.path.exists(outputDirectory):
+        os.makedirs(outputDirectory)
+    for f in os.listdir(ptDirectory):
+        if 'output' in f:
+            scores, labels, ids = load_pin_scores(os.path.join(ptDirectory, f), scoreKey, labelKey, idKey)
+            allScores = {}
+            lineNum = 0
+            targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+            decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+            for s,l,i in zip(scores,labels,ids):
+                lineNum += 1
+                scanMassPair = mapIdToScanMass[i]
+                if l==1:
+                    targetCheck.add(scanMassPair)
+                    if scanMassPair in allScores:
+                        allScores[scanMassPair].append((s,1))
+                    else:
+                        allScores[scanMassPair] = [(s,1)]
+                elif l==-1:
+                    decoyCheck.add(scanMassPair)
+                    if scanMassPair in allScores:
+                        allScores[scanMassPair].append((s,-1))
+                    else:
+                        allScores[scanMassPair] = [(s,-1)]
+                else:
+                    raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
+            print("Input file %s: read %d scores" % (os.path.join(ptDirectory, f),lineNum-1))
+            # Perform the competition
+            with open(os.path.join(outputDirectory, f), 'w') as fid:
+                lineNum = 0
+                # Write header: (1) id (2) score (3) label
+                fid.write("%s\t%s\t%s\t%s\t%s\n" % (idKey, scoreKey, labelKey, "ScanNr", "ExpMass"))
+                for scanMassPair in allScores:
+                    if scanMassPair in targetCheck and scanMassPair in decoyCheck:
+                        lineNum += 1
+                        s,l = max(allScores[scanMassPair], key = lambda r: r[0])
+                        psmid = mapScanMassToId[scanMassPair] 
+                        fid.write("%s\t%f\t%d\t%d\t%s\n" % (psmid, s, l,scanMassPair[0], scanMassPair[1]))
+                print("Output file %s: wrote %d scores" % (os.path.join(outputDirectory, f), lineNum))
+
+def psmId_diffs(inputPin, percFiles, pinFile, percScoreKey = 'score', pinScoreKey = 'score',
+                labelKey = "Label", idKey = "PSMId"):
+    """ Check differences in PSM ids between output files
+    """
+    pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(inputPin, normalize = False)
+    # determine mapping from PSMId/SpecId to (scannr, expmass)
+    mapIdToScanMass = {}
+    mapScanMassToId = {}
+    for p, s, em in zip(pepstrings,sids,expMasses):
+        psmId = p[0]
+        mapIdToScanMass[psmId] = (s,em)
+        mapScanMassToId[(s,em)] = psmId
+    print("%d unique Sids, %d unique exp masses" % (len(set(sids)), len(set(expMasses))))
+
+    _, _, percIds = load_percolator_target_decoy_files(percFiles, percScoreKey)
+    _, _, pinIds = load_pin_scores(pinFile, pinScoreKey)
+    percScans = set([mapIdToScanMass[psmId][0] for psmId in percIds])
+    pinScans = set([mapIdToScanMass[psmId][0] for psmId in pinIds])
+    print("%d ids in %s,%s not in %s:" % (len(percScans - pinScans), percFiles[0], percFiles[1], pinFile))
+    for sid in percScans - pinScans:
+        print("%d" % (sid))
+    # print("Ids in %s not in %s,%s:" % (pinFile, percFiles[0], percFiles[1]))
+    # for psmid in pinIds - percIds:
+    #     print("%s" % psmid)
+    
+
+def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001, tdc = False):
     """ Load all PSMs and features file
     """
     if len(filenames)==1:
@@ -416,7 +454,7 @@ def load_test_scores(filenames, scoreKey = 'score', is_perc=0, qTol = 0.01, qCur
         if tdc:
             scores, labels = load_percolator_target_decoy_files_tdc(filenames, scoreKey)
         else:
-            scores, labels = load_percolator_target_decoy_files(filenames, scoreKey)
+            scores, labels, _ = load_percolator_target_decoy_files(filenames, scoreKey)
     else:
         raise ValueError('Number of filenames supplied for a single method was > 2, exitting.\n')
     # Check scores multiplied by both 1 and positive -1
@@ -751,7 +789,6 @@ def main(args, output, maxq, doTdc = False):
         print ('%s: %d identifications, AUC = %f' % (desc, len(qs), auc))
     for argument in args:
         process(argument)
-    # scorelists = refine(scorelists)
     plot(scorelists, output, maxq, methods)
 
 

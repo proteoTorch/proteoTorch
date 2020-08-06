@@ -253,14 +253,33 @@ def load_pin_return_featureMatrix(filename, normalize = True):
     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
     headerInOrder = r.fieldnames
     l = headerInOrder
-    sids = [] # keep track of spectrum IDs
+    sids = [] # keep track of spectrum IDs and exp masses for FDR post-processing
+    expMasses = [] 
     # Check that header fields follow pin schema
     # spectrum identification key for PIN files
     # Note: this string must be stated exactly as the third header field
     sidKey = "ScanNr"
-    if "ScanNr" not in l:
-        raise ValueError("No ScanNr field, exitting")
+    if sidKey not in l:
+        raise ValueError("No %s field, exitting" % (sidKey))
+    expMassKey = "ExpMass"
+    if expMassKey not in l:
+        raise ValueError("No %s field, exitting" % (expMassKey))
     constKeys = [l[0]]
+
+    # denote charge keys
+    maxCharge = 1
+    chargeKeys = set([])
+    for i in l:
+        m = i.lower()
+        if m[:-1]=='charge':
+            try:
+                c = int(m[-1])
+            except ValueError:
+                print("Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1))
+
+            chargeKeys.add(i)
+            maxCharge = max(maxCharge, int(m[-1]))
+
     # Check label
     m = l[1]
     if m.lower() == 'label':
@@ -282,8 +301,7 @@ def load_pin_return_featureMatrix(filename, normalize = True):
     for h in headerInOrder: # keep order of keys intact
         if h not in constKeys:
             keys.append(h)
-    # featureNames = ['XCorr', 'PepLen', 'deltLCn', 'lnNumDSP', 'dM', 'absdM']
-    # keys = ['XCorr', 'PepLen', 'deltLCn', 'lnNumDSP', 'dM', 'absdM']
+    
     featureNames = []
     for k in keys:
         featureNames.append(k)  
@@ -300,6 +318,11 @@ def load_pin_return_featureMatrix(filename, normalize = True):
             sid = int(l[sidKey])
         except ValueError:
             print("Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1))
+        # try:
+        #     expMass = float(l[expMassKey])
+        # except ValueError:
+        #     print("Could not convert exp mass %s on line %d to float, exitting" % (l[expMassKey], i+1))
+        expMass = l[expMassKey]
         try:
             y = int(l["Label"])
         except ValueError:
@@ -319,6 +342,7 @@ def load_pin_return_featureMatrix(filename, normalize = True):
             Y.append(y)
             pepstrings.append(el_strings)
             sids.append(sid)
+            expMasses.append(expMass)
             numRows += 1
         else:
             if y == 1:
@@ -333,6 +357,7 @@ def load_pin_return_featureMatrix(filename, normalize = True):
                     Y.append(1)
                     pepstrings.append(el_strings)
                     sids.append(sid)
+                    expMasses.append(expMass)
                     numRows += 1
             elif y == -1:
                 if sid in decoys:
@@ -346,16 +371,17 @@ def load_pin_return_featureMatrix(filename, normalize = True):
                     Y.append(-1)
                     pepstrings.append(el_strings)
                     sids.append(sid)
+                    expMasses.append(expMass)
                     numRows += 1
     f.close()
     if not normalize:
-        return pepstrings, np.array(X), np.array(Y), featureNames, sids
+        return pepstrings, np.array(X), np.array(Y), featureNames, sids, expMasses
 
     if _standardNorm:
-        return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids
+        return pepstrings, preprocessing.scale(np.array(X)), np.array(Y), featureNames, sids, expMasses
     else:
         min_max_scaler = preprocessing.MinMaxScaler()
-        return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids
+        return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids, expMasses
 
 def writeIdent(output, scores, Y, pepstrings,sids):
     """ Header is: (1) Kind (2) Sid (3) Peptide (4) Score
@@ -469,23 +495,6 @@ def findInitDirection_threaded(X, Y, thresh, featureNames,
     results = [pool.apply_async(evalDirectionInThread, 
                                 args=(i, X[:,i], Y, thresh, featureNames)) 
                for i in range(m)]
-    # for i in range(m):
-    #     scores = X[:,i]
-    #     # Check scores multiplied by both 1 and positive -1
-    #     for checkNegBest in range(2):
-    #         if checkNegBest==1:
-    #             taq, _, _ = calcQ(-1. * scores, Y, thresh, True)
-    #         else:
-    #             taq, _, _ = calcQ(scores, Y, thresh, True)
-    #         if len(taq) > numIdentified:
-    #             initDirection = i
-    #             numIdentified = len(taq)
-    #             negBest = checkNegBest==1
-    #         if _debug and _verb >= 2:
-    #             if checkNegBest==1:
-    #                 print("Direction -%d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
-    #             else:
-    #                 print("Direction %d, %s: Could separate %d identifications" % (i, featureNames[i], len(taq)))
     pool.close()
     pool.join() # wait for jobs to finish before continuing
 
@@ -1033,7 +1042,7 @@ def mainIter(hyperparams):
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
-    pepstrings, X, Y, featureNames, sids0 = load_pin_return_featureMatrix(hyperparams['pin'])
+    pepstrings, X, Y, featureNames, sids0, _ = load_pin_return_featureMatrix(hyperparams['pin'])
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
     m = l[1] # number of features
