@@ -110,7 +110,7 @@ def numIdentifiedAtQ_v2(predictions, labels, thresh = 0.002):
     if predictions.ndim==2:
         predictions = predictions[:,1] #softmax() already applied #[:, 1] - predictions[:, 0]
 
-    ps = numIdentifiedAtQ(predictions, labels)
+    ps = numIdentifiedAtQ(predictions, labels, thresh)
     return np.asarray(ps, 'float32'), len(labels)
 
 

@@ -560,6 +560,39 @@ def searchForInitialDirection_split(keys, X, Y, q, featureNames, numThreads = 1)
         kFold += 1
     return scores, initTaq
 
+def deepDirectionSearch(keys, scores, X, Y,
+                        dnn_hyperparams={}, ensemble = 50):
+    """ Given initial set of scores, perform a deep direction search with a large number of ensembles
+    """
+    estTaq = 0
+    newScores = []
+    dds_params = dnn_hyperparams.copy()
+    dd_params['snapshot_ensemble_count'] = ensemble
+    thresh = dnn_hyperparams['deepq']
+    q = dnn_hyperparams['q']
+        
+    for kFold, cvBinSids in enumerate(keys):
+        # Find training set using q-value analysis
+        taq, daq, _ = calcQ(scores[kFold], Y[cvBinSids], thresh, True)
+        td = [cvBinSids[i] for i in taq]
+        gd = getDecoyIdx(Y, cvBinSids)
+        # Debugging check
+        if _debug and _verb >= 1:
+            print("CV fold %d: |targets| = %d, |decoys| = %d, |taq|=%d, |daq|=%d" % (kFold, len(cvBinSids) - len(gd), len(gd), len(taq), len(daq)))
+        trainSids = gd + td
+        validation_Sids = cvBinSids
+        features = X[trainSids]
+        labels = Y[trainSids]
+        validation_Features = X[validation_Sids]
+        validation_Labels = Y[validation_Sids]
+        
+        topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
+                                                             validation_Labels, hparams=dnn_hyperparams, model = None)
+        newScores.append(topScores)
+        ps = numIdentifiedAtQ(topScores, validation_labels, q)
+        estTaq += len(ps)
+    return scores, estTaq
+
 
 #########################################################
 #########################################################
@@ -1016,6 +1049,8 @@ def mainIter(hyperparams):
     _seed=hyperparams['seed']
     _verb=hyperparams['verbose']
 
+
+    ensemble0 = hyperparams['snapshot_ensemble_count']
     prevMethod=-1
     ms = [int(i) for i in hyperparams['methods'].split(',')]
 
@@ -1059,15 +1094,25 @@ def mainIter(hyperparams):
     else:
         scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
     print("Could initially separate %d identifications" % ( initTaq / 2 ))
+    if hyperparams['deepInitDirection']:
+        scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
+                                              dnn_hyperparams=hyperparams, ensemble = 50)
     # Iteratre
     fp = 0 # current number of identifications
     fpo = 0 # number of identifications from previous iteration
     fpoo = 0 # number of identifications from previous, previous iteration
     trained_models = []
     for i in range(hyperparams['maxIters']):
+        # if i==0:
+        #     hyperparams['snapshot_ensemble_count'] = 50
+        # else:
+        #     hyperparams['snapshot_ensemble_count'] = ensemble0
+
         hyperparams['method'] = ms[i]
         if ms[i] == 3:
             q = hyperparams['deepq']
+        else:
+            q = hyperparams['q']
         # else:
         #     q = hyperparams['q']
         # if i < 5:
@@ -1149,6 +1194,7 @@ if __name__ == '__main__':
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.05)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--numThreads', type = 'int', action= 'store', default=1)
     parser.add_option('--verbose', type = 'int', action= 'store', default = 3)

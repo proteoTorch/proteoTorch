@@ -610,10 +610,10 @@ def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0
             ind0 = ind
     # print "Accuracy = %f%%" % (numIdentifiedAtQ / float(len(qs)) * 100)
     # set AUC weights to uniform 
-    auc = np.trapz(quac)#/len(quac)#/quac[-1]
-    if qTol > qCurveCheck:
-        auc = 0.3 * auc + 0.7 * np.trapz(quac)#/ind0#/quac[ind0-1]
-    return qs, ps, auc
+    # auc = np.trapz(quac)#/len(quac)#/quac[-1]
+    # if qTol > qCurveCheck:
+    #     auc = 0.3 * auc + 0.7 * np.trapz(quac)#/ind0#/quac[ind0-1]
+    return qs, ps, numIdentifiedAtQ
 
 
 #############################################
@@ -930,11 +930,11 @@ def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = Fa
     def process(arg):
         desc, scoreKey, fn = parse_arg(arg)
         methods.append(desc)
-        qs, ps, auc = load_test_scores(fn, scoreKey, tdc = doTdc, 
+        qs, ps, naq = load_test_scores(fn, scoreKey, tdc = doTdc, 
                                        psmIdToScanMass = mapIdToScanMass, scanMassTopsmId = mapScanMassToId,
                                        writeTdc = writeTdcResults, tdcDir = tdcOutputDir)
         scorelists.append( (qs, ps) )
-        print ('%s: %d identifications, AUC = %f' % (desc, len(qs), auc))
+        print ('%s: %d identifications, %d identified at q <= 0.01' % (desc, len(qs), naq))
     for argument in args:
         process(argument)
     plot(scorelists, output, maxq, methods)
