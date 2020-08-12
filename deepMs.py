@@ -591,7 +591,7 @@ def deepDirectionSearch(keys, scores, X, Y,
         newScores.append(topScores)
         ps = numIdentifiedAtQ(topScores, validation_Labels, q)
         estTaq += len(ps)
-    return scores, estTaq
+    return newScores, estTaq
 
 
 #########################################################
@@ -1095,6 +1095,7 @@ def mainIter(hyperparams):
         scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
     print("Could initially separate %d identifications" % ( initTaq / 2 ))
     if hyperparams['deepInitDirection']:
+        print("Performing deep initial direction search")
         scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
                                               dnn_hyperparams=hyperparams, ensemble = 50)
     # Iteratre
