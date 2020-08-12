@@ -567,7 +567,7 @@ def deepDirectionSearch(keys, scores, X, Y,
     estTaq = 0
     newScores = []
     dds_params = dnn_hyperparams.copy()
-    dd_params['snapshot_ensemble_count'] = ensemble
+    dds_params['snapshot_ensemble_count'] = ensemble
     thresh = dnn_hyperparams['deepq']
     q = dnn_hyperparams['q']
         
@@ -587,9 +587,9 @@ def deepDirectionSearch(keys, scores, X, Y,
         validation_Labels = Y[validation_Sids]
         
         topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                             validation_Labels, hparams=dnn_hyperparams, model = None)
+                                                             validation_Labels, hparams=dds_params, model = None)
         newScores.append(topScores)
-        ps = numIdentifiedAtQ(topScores, validation_labels, q)
+        ps = numIdentifiedAtQ(topScores, validation_Labels, q)
         estTaq += len(ps)
     return scores, estTaq
 
