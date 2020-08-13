@@ -1193,7 +1193,7 @@ if __name__ == '__main__':
 
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
-    parser.add_option('--deepq', type = 'float', action= 'store', default = 0.05)
+    parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
@@ -1203,7 +1203,7 @@ if __name__ == '__main__':
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
     parser.add_option('--methods', type = 'string', action= 'store', default = '3', 
                       help = 'String binding which method to run at which iteration.  See method input for more info about available methods.')
-    parser.add_option('--maxIters', type = 'int', action= 'store', default = 20, help='number of iterations; runs on multiple splits per iterations.') #4
+    parser.add_option('--maxIters', type = 'int', action= 'store', default = 10, help='number of iterations; runs on multiple splits per iterations.') #4
     parser.add_option('--pin', type = 'string', action= 'store', help='input file in PIN format')
     parser.add_option('--output_dir', type = 'string', action= 'store', default=None, help='Defaults to model_output/<data_file_name>/<time_stamp>/')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
@@ -1218,10 +1218,10 @@ if __name__ == '__main__':
                       help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
-    parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
+    parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.1, help='AUC q-value tolerance for validation set.')
     # parser.add_option('--dnn_train_qtol2', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
     parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
-    parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 1.5, help='Multiplicative factor to weight false positives')
+    parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 4.0, help='Multiplicative factor to weight false positives')
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'adam', help='DNN solver to use.')
     (_options, _args) = parser.parse_args()
 
