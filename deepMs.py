@@ -587,7 +587,7 @@ def deepDirectionSearch(keys, scores, X, Y,
         validation_Labels = Y[validation_Sids]
         
         topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                             validation_Labels, hparams=dds_params, model = None)
+                                                             validation_Labels, hparams=dds_params, load_prev_iter_model=False)
         newScores.append(topScores)
         ps = numIdentifiedAtQ(topScores, validation_Labels, q)
         estTaq += len(ps)
