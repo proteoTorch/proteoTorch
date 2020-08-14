@@ -824,6 +824,7 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
         print("CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq))
     return topScores, bestTaq, bestClf
 
+
 def evalSvmCposCnegPair(features, labels, 
                         validation_Features, validation_Labels,
                         tron, cpos, cfrac, alpha, thresh, kFold):
@@ -841,6 +842,7 @@ def evalSvmCposCnegPair(features, labels,
     if _debug and _verb > 2:
         print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
     return (cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
+
 
 def evalSvmCposCnegPair_globalDataMatrix(tron, cpos, cfrac, alpha, thresh, kFold):
     features = _mp_data[(kFold, 'X')]
@@ -861,6 +863,7 @@ def evalSvmCposCnegPair_globalDataMatrix(tron, cpos, cfrac, alpha, thresh, kFold
     if _debug and _verb > 2:
         print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
     return (kFold, cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
+
 
 def doSvmGridSearch_threaded(thresh, kFold, features, labels, validation_Features, validation_Labels, 
                              cposes, cfracs, alpha, tron = True, currIter=1, numThreads = 1):
@@ -925,9 +928,9 @@ def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
 ################### Main training functions
 #########################################################
 #########################################################
-def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1, 
+def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=0, 
            dnn_hyperparams={}, prev_iter_models=[], numThreads = 1,
-           previousMethod = -1):
+           output_dir=None, i_first_dnn_iter=0):
     """ Train a classifier on CV bins.
         Method 0: LDA
         Method 1: linear SVM, solver TRON
@@ -948,8 +951,8 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     tron = False
     alpha = 1. # Scale factor for classes, as L2-SVM-MFN and TRON assume different 
                # class weight scales
-    if prev_iter_models is None or len(prev_iter_models) < len(keys):
-        prev_iter_models = [None] * len(keys)
+#    if prev_iter_models is None or len(prev_iter_models) < len(keys):
+#        prev_iter_models = [None] * len(keys)
 
     isSvm = False
     if method==1:
@@ -981,12 +984,12 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
                 topScores, bestTaq, bestClf = doSvmGridSearch(thresh, kFold, features, labels,validation_Features, validation_Labels,
                                                               cposes, cfracs, alpha, tron, currIter)
             else:
-                if previousMethod != 3:
-                    topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                                         validation_Labels, hparams=dnn_hyperparams, model = None)
-                else:
-                    topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                                         validation_Labels, hparams=dnn_hyperparams, model = prev_iter_models[kFold])
+                topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
+                                                                     validation_Labels, hparams=dnn_hyperparams,
+                                                                     load_prev_iter_model=dnn_hyperparams['load_prev_iter_model'],
+                                                                     warm_start_training_model=dnn_hyperparams['dnn_load_model'],
+                                                                     #model = prev_iter_models[kFold] if previousMethod == 3 else None,
+                                                                     output_dir=output_dir, currIter=currIter, i_first_dnn_iter=i_first_dnn_iter)
             all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
             newScores.append(topScores)
             clfs.append(bestClf)
@@ -1050,9 +1053,12 @@ def mainIter(hyperparams):
     _verb=hyperparams['verbose']
 
 
-    ensemble0 = hyperparams['snapshot_ensemble_count']
-    prevMethod=-1
-    ms = [int(i) for i in hyperparams['methods'].split(',')]
+    #ensemble0 = hyperparams['snapshot_ensemble_count']
+    
+    methods = [int(i) for i in hyperparams['methods'].split(',')]
+    if len(methods) < hyperparams['maxIters']:
+        methods = methods + [methods[-1]] * (hyperparams['maxIters'] - len(methods))
+    i_first_dnn_iter = min([i if k==3 else 9e9 for i, k in enumerate(methods)]) # first iteration index where dnn is used (method 3)
 
     if hyperparams['method']==2 and not svmlinReady:
         print("Selected method 2, SVM learning with L2-SVM-MFN,")
@@ -1109,8 +1115,8 @@ def mainIter(hyperparams):
         # else:
         #     hyperparams['snapshot_ensemble_count'] = ensemble0
 
-        hyperparams['method'] = ms[i]
-        if ms[i] == 3:
+        hyperparams['method'] = methods[i]
+        if methods[i] == 3:
             q = hyperparams['deepq']
         else:
             q = hyperparams['q']
@@ -1154,7 +1160,7 @@ def mainIter(hyperparams):
         scores, fp, trained_models, validation_AUC = doIter(
             q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
             dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'], 
-            previousMethod = prevMethod)
+            output_dir=output_dir, i_first_dnn_iter=i_first_dnn_iter)
         print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
             print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
@@ -1201,7 +1207,7 @@ if __name__ == '__main__':
     parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
     parser.add_option('--method', type = 'int', action= 'store', default = 3, 
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
-    parser.add_option('--methods', type = 'string', action= 'store', default = '3', 
+    parser.add_option('--methods', type = 'string', action= 'store', default = '0,3', 
                       help = 'String binding which method to run at which iteration.  See method input for more info about available methods.')
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 10, help='number of iterations; runs on multiple splits per iterations.') #4
     parser.add_option('--pin', type = 'string', action= 'store', help='input file in PIN format')
@@ -1210,7 +1216,9 @@ if __name__ == '__main__':
     parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 60, help='number of epochs for training the DNN model.')
     parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
     parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.02, 
-                      help='learning rate reduced by this factor during training overall (a fraction of this is applied after each epoch).')
+                      help='learning rate reduced by this factor during training (a fraction of this is applied after each epoch).')
+    parser.add_option('--dnn_ens_reset_lr_decay', type = 'float', action= 'store', default = 0.3, 
+                      help='if using snapshot ensembles (snapshot_ensemble_count > 0) the lr is reset to the max value <snapshot_ensemble_count> many times. <dnn_ens_reset_lr_decay> reduces the overall learning rate exponentially a well as the reset values.')
     parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
     parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate; must be 0 <= rate < 1.')
@@ -1219,9 +1227,13 @@ if __name__ == '__main__':
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.1, help='AUC q-value tolerance for validation set.')
+    parser.add_option('--load_prev_iter_model', type = 'int', action= 'store', default = 1, 
+                      help="1/0: warm-start training of iterations (except the first) using the previous iteration's model.")
+    parser.add_option('--dnn_load_model', type = 'str', action= 'store', default = '', 
+                      help='Path to file with model weights. If provided: will warm start training of the first iteration using the provided model weights (model architecture must match!).')
     # parser.add_option('--dnn_train_qtol2', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
     parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
-    parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 4.0, help='Multiplicative factor to weight false positives')
+    parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 4, help='Multiplicative factor to weight false positives')
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'adam', help='DNN solver to use.')
     (_options, _args) = parser.parse_args()
 

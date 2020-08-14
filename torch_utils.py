@@ -190,7 +190,7 @@ def register_params_in_model(model, param_list, prefix=''):
 
 
 
-def update_lr(optimizer, initial_lr, relative_progress, total_lr_decay):
+def update_lr(optimizer, initial_lr, relative_progress, total_lr_decay, factor=1):
     """
     exponential decay
 
@@ -199,7 +199,7 @@ def update_lr(optimizer, initial_lr, relative_progress, total_lr_decay):
     relative_progress: value in [0, 1] -- current position in training, where 0 == beginning, 1==end of training and a linear interpolation in-between
     """
     assert total_lr_decay > 0 and total_lr_decay <= 1
-    lr = initial_lr * total_lr_decay**(relative_progress)
+    lr = initial_lr * total_lr_decay**(relative_progress) * factor
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
@@ -234,7 +234,7 @@ def run_model_on_data(data, model, device, batchsize=50):
 def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_data,
                 validation_metric = accuracy, validation_check_interval=1, #apply_softmax_to_predictions = True,
                 batchsize = 100, num_epochs = 100, train = True,
-                 initial_lr=3e-3, total_lr_decay=0.2, verbose = 1,
+                 initial_lr=3e-3, total_lr_decay=0.2, ensemble_reset_lr_decay=1, verbose = 1,
                  use_early_stopping = True,
                  snapshot_ensemble_count = 0):
     """
@@ -262,10 +262,15 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
     validation_check_interval:
         
         compute validation score only every XX epochs (to speed up training).
+        
     total_lr_decay:
 
-        value in (0, 1] -- this is the inverse total LR reduction factor over the course of training
+        value in (0, 1] -- this is the inverse total LR reduction factor over the course of training. If using snapshot ensembles the decay is applied per ensemble model (i.e. much faster).
 
+    ensemble_reset_lr_decay:
+        
+        applies to snapshot ensembles: applies an exponentially decaying envelope over the learning rate; 
+    
     verbose:
 
         value in [0,1,2] -- 0 print minimal information (when training ends), 1 shows training loss, 2 shows training and validation loss after each epoch
@@ -305,7 +310,7 @@ def train_model(model, device, loss_fn, optimizer, train_data, valid_data, test_
         times=[]
         for epoch in range(num_epochs):
             if snapshot_ensemble_count > 0:
-                update_lr(optimizer, initial_lr, (epoch % lr_reset_every_n_epochs) * 1. / lr_reset_every_n_epochs, total_lr_decay)
+                update_lr(optimizer, initial_lr, (epoch % lr_reset_every_n_epochs) * 1. / lr_reset_every_n_epochs, total_lr_decay, ensemble_reset_lr_decay**(epoch*1./num_epochs))
             else:
                 update_lr(optimizer, initial_lr, epoch*1./num_epochs, total_lr_decay)
             train_data = permute_data_2(train_data)
@@ -386,9 +391,9 @@ class Ensemble_Wrapper(object):
     
     def get_single_model(self):
         '''
-        returns last model from given weights list (passed to init)
+        returns first model from given weights list (passed to init)
         '''
-        set_model_params(self._model, self._weights_list[-1])
+        set_model_params(self._model, self._weights_list[0])
         return self._model
     
     def run_model_on_data(self, data, batchsize=50):
@@ -414,9 +419,8 @@ class Ensemble_Wrapper(object):
         self._model.train()
     
     def state_dict(self):
-        '''WARNING: not implemented correctly!'''
-        print('WARNING (TODO): Ensemble_Wrapper.state_dict(): not implemented correctly; only returns one model, not entire ensemble!')
-        return self._model.state_dict()
+        '''WARNING: only returns the first model and not the entire ensemble'''
+        return self.get_single_model().state_dict()
     
 
 

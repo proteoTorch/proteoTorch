@@ -199,7 +199,8 @@ def convert_labels(binary_labels):
 
 
 
-def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Features, validation_Labels, hparams = {}, model=None):
+def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Features, validation_Labels, 
+                  hparams = {}, load_prev_iter_model=True, output_dir=None, currIter=0, warm_start_training_model=None, i_first_dnn_iter=0):
     """ 
     Train & test MLP model on one CV split
     
@@ -210,23 +211,44 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     model:
         
         Pass None to create a new model or pass a model to fine-tune it
+    
+    output_dir:
+        
+        if None: nothing saved, which makes <load_prev_iter_model> impossible; if string then model weights are stored as output_dir+"dnn_weights_iter{}_fold{}.pt".format(currIter, kFold)
+    
+    warm_start_training_model:
+        
+        at <currIter> == 0: will load the model weights in the file located at <warm_start_training_model>
+        
+    i_first_dnn_iter:
+        
+        int: first iteration where dnn is used (usually 0, but use can choose to run LDA or similar as 0th iteration)
+    
     """
+    if output_dir is not None:
+        if not output_dir[-1]=='/':
+            output_dir = output_dir + '/'
+    else:
+        assert load_prev_iter_model == False, 'ERROR: <output_dir> is None which is incompatible with load_prev_iter_model==True'
     tmp_hparams = _DEFAULT_HYPERPARAMS.copy()
     tmp_hparams.update(hparams)
     hparams = tmp_hparams.copy()
     DEVICE = torch.device("cuda:"+str(hparams['dnn_gpu_id']) if torch.cuda.is_available() else "cpu")
     
-    if model is None:
-        model = MLP_model(num_input_channels=len(train_features[0]), number_of_classes = 2, **hparams)
-        model = model.to(DEVICE)
-        print('DNNSingleFold: new model on device', DEVICE)
-    else:
-        for i in range(42):
-            if hasattr(model, 'get_single_model'): # is an ensemble model; extract one of them and train it
-                model = model.get_single_model()
-            else:
-                break
-        print('DNNSingleFold: fine-tuning given model on device', DEVICE)
+    model = MLP_model(num_input_channels=len(train_features[0]), number_of_classes = 2, **hparams)
+    model = model.to(DEVICE)
+
+    if currIter>i_first_dnn_iter and load_prev_iter_model:
+        print('DNNSingleFold: loading model from previous iteration', DEVICE)
+        params = torch.load(output_dir + "dnn_weights_iter{}_fold{}.pt".format(currIter - 1, kFold))
+        torch_utils.set_model_params(model, params)
+        
+    if currIter==i_first_dnn_iter and warm_start_training_model is not None and len(warm_start_training_model):
+        print('DNNSingleFold: loading warm start model (iteration 0 only)')
+        params = torch.load(warm_start_training_model)
+        torch_utils.set_model_params(model, params)
+        
+        
     train_data = (np.asarray(train_features).astype('float32'), convert_labels(train_labels))
     valid_data = (np.asarray(validation_Features).astype('float32'), convert_labels(validation_Labels))
     
@@ -262,11 +284,15 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
             optimizer=optimizer, train_data=train_data, 
             valid_data=valid_data, test_data=valid_data, 
             batchsize=hparams['batchsize'], num_epochs=hparams['dnn_num_epochs'], train=True, initial_lr=hparams['dnn_lr'], 
-            total_lr_decay=hparams['dnn_lr_decay'], verbose=1, use_early_stopping=True, 
+            total_lr_decay=hparams['dnn_lr_decay'], ensemble_reset_lr_decay=hparams['dnn_ens_reset_lr_decay'], verbose=1, use_early_stopping=True, 
             validation_metric=val_metric, validation_check_interval=20,
             snapshot_ensemble_count=hparams['snapshot_ensemble_count'])
     
-    #torch.save(the_model.state_dict(), 'output/' + 'MLP_model_params.h5')
+    #save weights
+    if output_dir is not None:
+        torch.save(model.state_dict(), output_dir+"dnn_weights_iter{}_fold{}.pt".format(currIter, kFold))
+        
+    #torch.save(the_model.state_dict(), 'output/' + 'MLP_model_params.pt')
     # grab predictions for class 1
     test_pred = torch_utils.run_model_on_data(valid_data[0], model, DEVICE, 5000)[:, 1]
         
