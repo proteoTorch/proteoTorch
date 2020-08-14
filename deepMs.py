@@ -1217,7 +1217,7 @@ if __name__ == '__main__':
     parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
     parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.02, 
                       help='learning rate reduced by this factor during training (a fraction of this is applied after each epoch).')
-    parser.add_option('--dnn_ens_reset_lr_decay', type = 'float', action= 'store', default = 0.3, 
+    parser.add_option('--dnn_ens_reset_lr_decay', type = 'float', action= 'store', default = 1, 
                       help='if using snapshot ensembles (snapshot_ensemble_count > 0) the lr is reset to the max value <snapshot_ensemble_count> many times. <dnn_ens_reset_lr_decay> reduces the overall learning rate exponentially a well as the reset values.')
     parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
