@@ -71,36 +71,6 @@ def calcQCompetition_v2(predictions, labels):
         predictions = predictions[:,1] #softmax() already applied #[:, 1] - predictions[:, 0]
 
     qs, ps = calcQAndNumIdentified(predictions, labels)
-    # is_pos_neg = labels[np.argsort(predictions)[::-1]]
-    # ps = []
-    # fdrs = []
-    # posTot = 0.0
-    # fpTot = 0.0
-    # fdr = 0.0
-    # for ispos in is_pos_neg:
-    #     if ispos == 1: 
-    #         posTot += 1.0
-    #     else: 
-    #         fpTot += 1.0
-    #     #--- check for zero positives
-    #     if posTot == 0.0: 
-    #         fdr = 100.0
-    #     else: 
-    #         fdr = fpTot / posTot
-    #     fdrs.append(fdr)
-    #     ps.append(posTot)
-    # qs = []
-    # lastQ = 100.0
-    # for idx in range(len(fdrs)-1, -1, -1):
-    #     q = 0.0
-    #     #--- q can never go up. 
-    #     if lastQ < fdrs[idx]:
-    #         q = lastQ
-    #     else:
-    #         q = fdrs[idx]
-    #     lastQ = q
-    #     qs.append(q)
-    # qs.reverse()
     return np.asarray(qs, 'float32'), np.asarray(ps, 'float32')
 
 def numIdentifiedAtQ_v2(predictions, labels, thresh = 0.002):
@@ -156,19 +126,8 @@ def AUC_up_to_tol_singleQ(qTol=0.002):
     def fn(predictions, labels):
         if labels.ndim==2:
             labels = np.argmax(labels, axis=1)
-        # qs, ps = calcQCompetition_v2(predictions, labels)
-
         ps, _ = numIdentifiedAtQ_v2(predictions, labels, qTol)
-        auc = np.trapz(ps)#/den/idx1
-        # idx1 = binary_search(qs, qTol)
-    #    idx2 = binary_search(qs, qCurveCheck)
-#        den = float(np.sum(labels>=1))
-        #print('AUC_upto_Tol: den =',den)
-
-        # auc = np.trapz(ps[:idx1])#/den/idx1
-
-    #    if qTol > qCurveCheck:
-    #        auc = 0.3 * auc + 0.7 * np.trapz(ps[:idx2])/den/idx2
+        auc = np.trapz(ps)
         return auc
     return fn
 

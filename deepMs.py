@@ -538,16 +538,18 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
 def load_and_score_dnns(thresh, keys, X, Y, hparams = {}, input_dir = None):
     """ Load dnns and generate test scores
     """
-    scores = np.zeros(Y.shape)
+    newScores = []
     totalTaq = 0
     num_features = X.shape[1]
     for kFold, sids in enumerate(keys):
         w = dnn_code.loadDNNSingleFold(num_features, kFold, hparams, input_dir)
-        scores[sids] = w.decision_function(X[sids])
+        scores = w.decision_function(X[sids])
         # Calculate true positives
-        tp, _, _ = calcQ(scores[sids], Y[sids], thresh, True)
+        tp, _, _ = calcQ(scores, Y[sids], thresh, True)
         totalTaq += len(tp)
-    return scores, totalTaq
+
+        newScores.append(scores)
+    return newScores, totalTaq
 
 def searchForInitialDirection_split(keys, X, Y, q, featureNames, numThreads = 1):
     """ Iterate through cross validation training sets and find initial search directions
@@ -1089,11 +1091,20 @@ def mainIter(hyperparams):
     if _debug and _verb >= 3:
         print(featureNames)
     trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
+
+    initDirectionFound = False
     if hyperparams['load_previous_dnn']:
-        print("Loading previously trained models")
-        scores, initTaq = load_and_score_dnns(q, trainKeys, X, Y, hyperparams, output_dir)
-        print("Could separate %d identifications" % ( initTaq / 2 ))
-    else:
+        input_dir = hyperparams['previous_dnn_dir']
+        if input_dir is not None:
+            if not input_dir[-1]=='/':
+                input_dir = input_dir + '/'
+
+            print("Loading previously trained models")
+            scores, initTaq = load_and_score_dnns(q, trainKeys, X, Y, hyperparams, input_dir)
+            print("Could separate %d identifications" % ( initTaq / 2 ))
+            initDirectionFound = True
+
+    if not initDirectionFound:
         initTaq = 0.
         initDir = hyperparams['initDirection']
         if initDir > -1 and initDir < m:
@@ -1183,6 +1194,7 @@ if __name__ == '__main__':
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--load_previous_dnn', action= 'store_true', help = 'Start iterations from previously trained model saved in output_dir')
+    parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--numThreads', type = 'int', action= 'store', default=1)

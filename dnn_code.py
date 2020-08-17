@@ -39,19 +39,12 @@ def q_val_AUC(qTol=0.003):
         numIdentifiedAtQ = 0
         quac = []
         den = float(len(scores))
-    #    ind0 = -1    
         for ind, (q, p) in enumerate(zip(qs, ps)):
             if q > qTol:
                 break
             numIdentifiedAtQ = float(p)
             quac.append(numIdentifiedAtQ / den)
-    #        if q < qCurveCheck:
-    #            ind0 = ind
-        # print "Accuracy = %f%%" % (numIdentifiedAtQ / float(len(qs)) * 100)
-        # set AUC weights to uniform 
         auc = np.trapz(quac)#/len(quac)#/quac[-1]
-    #    if qTol > qCurveCheck:
-    #        auc = 0.3 * auc + 0.7 * np.trapz(quac[:ind0])#/ind0#/quac[ind0-1]
         return auc
     return fn_auc
 
@@ -234,7 +227,6 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     else:
         raise ValueError('optimizer {} not supported'.format(hparams['dnn_optimizer']))
 
-#    val_metric = q_val_AUC(qTol=hparams['dnn_train_qtol'])
     val_metric = mini_utils.AUC_up_to_tol_singleQ(qTol=hparams['dnn_train_qtol'])
     
     # deal with trainin class imbalance
