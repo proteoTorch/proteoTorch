@@ -535,6 +535,19 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
             scores.append(currScores)
     return scores, initTaq
 
+def load_and_score_dnns(thresh, keys, X, Y, hparams = {}, input_dir = None):
+    """ Load dnns and generate test scores
+    """
+    scores = np.zeros(Y.shape)
+    totalTaq = 0
+    num_features = X.shape[1]
+    for kFold, sids in enumerate(keys):
+        w = dnn_code.loadDNNSingleFold(num_features, kFold, hparams, input_dir)
+        scores[sids] = w.decision_function(X[sids])
+        # Calculate true positives
+        tp, _, _ = calcQ(scores[sids], Y[sids], thresh, True)
+        totalTaq += len(tp)
+    return scores, totalTaq
 
 def searchForInitialDirection_split(keys, X, Y, q, featureNames, numThreads = 1):
     """ Iterate through cross validation training sets and find initial search directions
@@ -587,7 +600,7 @@ def deepDirectionSearch(keys, scores, X, Y,
         validation_Labels = Y[validation_Sids]
         
         topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                             validation_Labels, hparams=dds_params, load_prev_iter_model=False)
+                                                             validation_Labels, hparams=dds_params)
         newScores.append(topScores)
         ps = numIdentifiedAtQ(topScores, validation_Labels, q)
         estTaq += len(ps)
@@ -824,7 +837,6 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
         print("CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq))
     return topScores, bestTaq, bestClf
 
-
 def evalSvmCposCnegPair(features, labels, 
                         validation_Features, validation_Labels,
                         tron, cpos, cfrac, alpha, thresh, kFold):
@@ -842,7 +854,6 @@ def evalSvmCposCnegPair(features, labels,
     if _debug and _verb > 2:
         print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
     return (cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
-
 
 def evalSvmCposCnegPair_globalDataMatrix(tron, cpos, cfrac, alpha, thresh, kFold):
     features = _mp_data[(kFold, 'X')]
@@ -863,7 +874,6 @@ def evalSvmCposCnegPair_globalDataMatrix(tron, cpos, cfrac, alpha, thresh, kFold
     if _debug and _verb > 2:
         print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
     return (kFold, cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
-
 
 def doSvmGridSearch_threaded(thresh, kFold, features, labels, validation_Features, validation_Labels, 
                              cposes, cfracs, alpha, tron = True, currIter=1, numThreads = 1):
@@ -928,9 +938,8 @@ def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
 ################### Main training functions
 #########################################################
 #########################################################
-def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=0, 
-           dnn_hyperparams={}, prev_iter_models=[], numThreads = 1,
-           output_dir=None, i_first_dnn_iter=0):
+def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1, 
+           dnn_hyperparams={}, prev_iter_models=[], numThreads = 1):
     """ Train a classifier on CV bins.
         Method 0: LDA
         Method 1: linear SVM, solver TRON
@@ -951,8 +960,8 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=0,
     tron = False
     alpha = 1. # Scale factor for classes, as L2-SVM-MFN and TRON assume different 
                # class weight scales
-#    if prev_iter_models is None or len(prev_iter_models) < len(keys):
-#        prev_iter_models = [None] * len(keys)
+    # if prev_iter_models is None or len(prev_iter_models) < len(keys):
+    #     prev_iter_models = [None] * len(keys)
 
     isSvm = False
     if method==1:
@@ -985,11 +994,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=0,
                                                               cposes, cfracs, alpha, tron, currIter)
             else:
                 topScores, bestTaq, bestClf = dnn_code.DNNSingleFold(thresh, kFold, features, labels, validation_Features, 
-                                                                     validation_Labels, hparams=dnn_hyperparams,
-                                                                     load_prev_iter_model=dnn_hyperparams['load_prev_iter_model'],
-                                                                     warm_start_training_model=dnn_hyperparams['dnn_load_model'],
-                                                                     #model = prev_iter_models[kFold] if previousMethod == 3 else None,
-                                                                     output_dir=output_dir, currIter=currIter, i_first_dnn_iter=i_first_dnn_iter)
+                                                                     validation_Labels, hparams=dnn_hyperparams)
             all_AUCs.append( AUC_fn_001(topScores, validation_Labels) )
             newScores.append(topScores)
             clfs.append(bestClf)
@@ -1052,14 +1057,6 @@ def mainIter(hyperparams):
     _seed=hyperparams['seed']
     _verb=hyperparams['verbose']
 
-
-    #ensemble0 = hyperparams['snapshot_ensemble_count']
-    
-    methods = [int(i) for i in hyperparams['methods'].split(',')]
-    if len(methods) < hyperparams['maxIters']:
-        methods = methods + [methods[-1]] * (hyperparams['maxIters'] - len(methods))
-    i_first_dnn_iter = min([i if k==3 else 9e9 for i, k in enumerate(methods)]) # first iteration index where dnn is used (method 3)
-
     if hyperparams['method']==2 and not svmlinReady:
         print("Selected method 2, SVM learning with L2-SVM-MFN,")
         print("but this solver could be found.  Please build this solver")
@@ -1092,75 +1089,55 @@ def mainIter(hyperparams):
     if _debug and _verb >= 3:
         print(featureNames)
     trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
-    initTaq = 0.
-    initDir = hyperparams['initDirection']
-    if initDir > -1 and initDir < m:
-        print("Using specified initial direction %d" % (initDir))
-        scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
+    if hyperparams['load_previous_dnn']:
+        print("Loading previously trained models")
+        scores, initTaq = load_and_score_dnns(q, trainKeys, X, Y, hyperparams, output_dir)
+        print("Could separate %d identifications" % ( initTaq / 2 ))
     else:
-        scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
-    print("Could initially separate %d identifications" % ( initTaq / 2 ))
-    if hyperparams['deepInitDirection']:
-        print("Performing deep initial direction search")
-        scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
-                                              dnn_hyperparams=hyperparams, ensemble = 50)
-    # Iteratre
+        initTaq = 0.
+        initDir = hyperparams['initDirection']
+        if initDir > -1 and initDir < m:
+            print("Using specified initial direction %d" % (initDir))
+            scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
+        else:
+            scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
+        print("Could initially separate %d identifications" % ( initTaq / 2 ))
+        if hyperparams['deepInitDirection']:
+            print("Performing deep initial direction search")
+            scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
+                                                  dnn_hyperparams=hyperparams, ensemble = hyperparams['deep_direction_ensemble'])
+
+    # initTaq = 0.
+    # initDir = hyperparams['initDirection']
+    # if initDir > -1 and initDir < m:
+    #     print("Using specified initial direction %d" % (initDir))
+    #     scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
+    # else:
+    #     scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
+    # print("Could initially separate %d identifications" % ( initTaq / 2 ))
+    # if hyperparams['deepInitDirection']:
+    #     print("Performing deep initial direction search")
+    #     scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
+    #                                           dnn_hyperparams=hyperparams, ensemble = hyperparams['deep_direction_ensemble'])
+
+    # Iterate
     fp = 0 # current number of identifications
     fpo = 0 # number of identifications from previous iteration
     fpoo = 0 # number of identifications from previous, previous iteration
     trained_models = []
+    drop_out_rate = hyperparams['dnn_dropout_rate']
+    hyperparams['dnn_dropout_rate'] = hyperparams['starting_dropout_rate']
+    if hyperparams['method'] == 3:
+        q = hyperparams['deepq']
+    else:
+        q = hyperparams['q']
+
     for i in range(hyperparams['maxIters']):
-        # if i==0:
-        #     hyperparams['snapshot_ensemble_count'] = 50
-        # else:
-        #     hyperparams['snapshot_ensemble_count'] = ensemble0
-
-        hyperparams['method'] = methods[i]
-        if methods[i] == 3:
-            q = hyperparams['deepq']
-        else:
-            q = hyperparams['q']
-        # else:
-        #     q = hyperparams['q']
-        # if i < 5:
-        #     q = hyperparams['q']
-        #     # hyperparams['q'] = 0.02
-        #     # hyperparams['dnn_train_qtol'] = 0.02
-        # else:
-        #     q = hyperparams['q2']
-        #     # hyperparams['q'] = 0.01
-        #     hyperparams['dnn_train_qtol'] = hyperparams['dnn_train_qtol2']
-        #     hyperparams['dnn_optimizer'] = hyperparams['dnn_optimizer2']
-        # if i >= 5:
-        #     hyperparams['dnn_optimizer'] = hyperparams['dnn_optimizer2']
-
-        # if i==2:
-        #     q = hyperparams['q2']
-        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs2']
-        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate2']
-        # elif i==3:
-        #     q = hyperparams['q3']
-        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs3']
-        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate3']
-        # elif i==4:
-        #     q = hyperparams['q4']
-        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs4']
-        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate4']
-        # elif i==5:
-        #     q = hyperparams['q5']
-        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs5']
-        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate5']
-        # elif i >= 6:
-        #     q = hyperparams['q6']
-        #     hyperparams['dnn_num_epochs'] = hyperparams['dnn_num_epochs6']
-        #     hyperparams['dnn_dropout_rate'] = hyperparams['dnn_dropout_rate6']
-
-        # hyperparams['dnn_train_qtol'] = q
-
+        if i>0:
+            hyperparams['dnn_dropout_rate'] = drop_out_rate
         scores, fp, trained_models, validation_AUC = doIter(
             q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
-            dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'], 
-            output_dir=output_dir, i_first_dnn_iter=i_first_dnn_iter)
+            dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'])
         print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
         if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
             print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
@@ -1177,6 +1154,10 @@ def mainIter(hyperparams):
             writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
         else:
             writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
+        # save current models
+        if hyperparams['method']==3:
+            for fold, clf in enumerate(trained_models):
+                    dnn_code.saveDNNSingleFold(clf.get_single_model(), fold, output_dir)
 
     isSvmlin = (hyperparams['method']==2)
     testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
@@ -1201,13 +1182,14 @@ if __name__ == '__main__':
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
     parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
+    parser.add_option('--load_previous_dnn', action= 'store_true', help = 'Start iterations from previously trained model saved in output_dir')
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--numThreads', type = 'int', action= 'store', default=1)
     parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
     parser.add_option('--method', type = 'int', action= 'store', default = 3, 
                       help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
-    parser.add_option('--methods', type = 'string', action= 'store', default = '0,3', 
+    parser.add_option('--methods', type = 'string', action= 'store', default = '3', 
                       help = 'String binding which method to run at which iteration.  See method input for more info about available methods.')
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 10, help='number of iterations; runs on multiple splits per iterations.') #4
     parser.add_option('--pin', type = 'string', action= 'store', help='input file in PIN format')
@@ -1216,31 +1198,20 @@ if __name__ == '__main__':
     parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 60, help='number of epochs for training the DNN model.')
     parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
     parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.02, 
-                      help='learning rate reduced by this factor during training (a fraction of this is applied after each epoch).')
-    parser.add_option('--dnn_ens_reset_lr_decay', type = 'float', action= 'store', default = 1, 
-                      help='if using snapshot ensembles (snapshot_ensemble_count > 0) the lr is reset to the max value <snapshot_ensemble_count> many times. <dnn_ens_reset_lr_decay> reduces the overall learning rate exponentially a well as the reset values.')
+                      help='learning rate reduced by this factor during training overall (a fraction of this is applied after each epoch).')
     parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
     parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate; must be 0 <= rate < 1.')
+    parser.add_option('--starting_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate for first iteration, must be 0 <= rate < 1.  Values > 0 promote initial exploration of the parameter space')
     parser.add_option('--dnn_gpu_id', type = 'int', action= 'store', default = 0, 
                       help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.1, help='AUC q-value tolerance for validation set.')
-    parser.add_option('--load_prev_iter_model', type = 'int', action= 'store', default = 1, 
-                      help="1/0: warm-start training of iterations (except the first) using the previous iteration's model.")
-    parser.add_option('--dnn_load_model', type = 'str', action= 'store', default = '', 
-                      help='Path to file with model weights. If provided: will warm start training of the first iteration using the provided model weights (model architecture must match!).')
-    # parser.add_option('--dnn_train_qtol2', type = 'float', action= 'store', default = 0.002, help='AUC q-value tolerance for validation set.')
     parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
-    parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 4, help='Multiplicative factor to weight false positives')
+    parser.add_option('--deep_direction_ensemble', type = 'int', action= 'store', default = 20, help='Number of ensembles to train.')
+    parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 4.0, help='Multiplicative factor to weight false positives')
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'adam', help='DNN solver to use.')
     (_options, _args) = parser.parse_args()
-
-    # Seed random number generator.  To make shuffling nondeterministic, input seed <= -1
-    # if _options.seed <= -1:
-    #     random.seed()
-    # else:
-    #     random.seed(_options.seed)
     
     mainIter(_options.__dict__)

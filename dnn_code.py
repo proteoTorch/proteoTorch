@@ -7,7 +7,7 @@ See COPYING or http://opensource.org/licenses/OSL-3.0
 """
 #import os
 #os.environ['CUDA_VISIBLE_DEVICES'] ='0'
-
+from os import path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -161,15 +161,6 @@ class MLP_model(nn.Module):
         else:
             return x if self.training==True else F.softmax(x, dim=1)
 
-    
-#def preprocess_data(X):
-#    '''
-#    zero mean, unit standard deviation
-#    '''
-#    return (X - X.mean(0)[None, :])/(X.std(0)[None, :] + 1e-15)
-
-
-
 class ModelWrapper_like_sklearn(object):
     def __init__(self, model, device, batchsize=500):
         self._model = model
@@ -198,9 +189,7 @@ def convert_labels(binary_labels):
     return labels.astype('int64')
 
 
-
-def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Features, validation_Labels, 
-                  hparams = {}, load_prev_iter_model=True, output_dir=None, currIter=0, warm_start_training_model=None, i_first_dnn_iter=0):
+def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Features, validation_Labels, hparams = {}, model=None):
     """ 
     Train & test MLP model on one CV split
     
@@ -211,44 +200,23 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     model:
         
         Pass None to create a new model or pass a model to fine-tune it
-    
-    output_dir:
-        
-        if None: nothing saved, which makes <load_prev_iter_model> impossible; if string then model weights are stored as output_dir+"dnn_weights_iter{}_fold{}.pt".format(currIter, kFold)
-    
-    warm_start_training_model:
-        
-        at <currIter> == 0: will load the model weights in the file located at <warm_start_training_model>
-        
-    i_first_dnn_iter:
-        
-        int: first iteration where dnn is used (usually 0, but use can choose to run LDA or similar as 0th iteration)
-    
     """
-    if output_dir is not None:
-        if not output_dir[-1]=='/':
-            output_dir = output_dir + '/'
-    else:
-        assert load_prev_iter_model == False, 'ERROR: <output_dir> is None which is incompatible with load_prev_iter_model==True'
     tmp_hparams = _DEFAULT_HYPERPARAMS.copy()
     tmp_hparams.update(hparams)
     hparams = tmp_hparams.copy()
     DEVICE = torch.device("cuda:"+str(hparams['dnn_gpu_id']) if torch.cuda.is_available() else "cpu")
     
-    model = MLP_model(num_input_channels=len(train_features[0]), number_of_classes = 2, **hparams)
-    model = model.to(DEVICE)
-
-    if currIter>i_first_dnn_iter and load_prev_iter_model:
-        print('DNNSingleFold: loading model from previous iteration', DEVICE)
-        params = torch.load(output_dir + "dnn_weights_iter{}_fold{}.pt".format(currIter - 1, kFold))
-        torch_utils.set_model_params(model, params)
-        
-    if currIter==i_first_dnn_iter and warm_start_training_model is not None and len(warm_start_training_model):
-        print('DNNSingleFold: loading warm start model (iteration 0 only)')
-        params = torch.load(warm_start_training_model)
-        torch_utils.set_model_params(model, params)
-        
-        
+    if model is None:
+        model = MLP_model(num_input_channels=len(train_features[0]), number_of_classes = 2, **hparams)
+        model = model.to(DEVICE)
+        print('DNNSingleFold: new model on device', DEVICE)
+    else:
+        for i in range(42):
+            if hasattr(model, 'get_single_model'): # is an ensemble model; extract one of them and train it
+                model = model.get_single_model()
+            else:
+                break
+        print('DNNSingleFold: fine-tuning given model on device', DEVICE)
     train_data = (np.asarray(train_features).astype('float32'), convert_labels(train_labels))
     valid_data = (np.asarray(validation_Features).astype('float32'), convert_labels(validation_Labels))
     
@@ -277,22 +245,15 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     class_2_weight = n / 2. / n2
     class_weights = (class_1_weight, class_2_weight)
     print('class_weights', class_weights)
-    #loss_fn = nn.CrossEntropyLoss(),
     model, (train_acc, val_acc, test_acc), (train_loss_per_epoch, validation_loss_per_epoch) = torch_utils.train_model(
             model, DEVICE, loss_fn = label_smoothing_loss(DEVICE, [hparams['dnn_label_smoothing_0'], hparams['dnn_label_smoothing_1']], 
                                                           class_weights=class_weights, false_positive_loss_factor=hparams['false_positive_loss_factor']), 
             optimizer=optimizer, train_data=train_data, 
             valid_data=valid_data, test_data=valid_data, 
             batchsize=hparams['batchsize'], num_epochs=hparams['dnn_num_epochs'], train=True, initial_lr=hparams['dnn_lr'], 
-            total_lr_decay=hparams['dnn_lr_decay'], ensemble_reset_lr_decay=hparams['dnn_ens_reset_lr_decay'], verbose=1, use_early_stopping=True, 
+            total_lr_decay=hparams['dnn_lr_decay'], verbose=1, use_early_stopping=True, 
             validation_metric=val_metric, validation_check_interval=20,
             snapshot_ensemble_count=hparams['snapshot_ensemble_count'])
-    
-    #save weights
-    if output_dir is not None:
-        torch.save(model.state_dict(), output_dir+"dnn_weights_iter{}_fold{}.pt".format(currIter, kFold))
-        
-    #torch.save(the_model.state_dict(), 'output/' + 'MLP_model_params.pt')
     # grab predictions for class 1
     test_pred = torch_utils.run_model_on_data(valid_data[0], model, DEVICE, 5000)[:, 1]
         
@@ -300,6 +261,62 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     print("DNN CV finished for fold %d: %d targets identified" % (kFold, len(tp)))
     return test_pred, len(tp), ModelWrapper_like_sklearn(model, DEVICE)
 
+
+def saveDNNSingleFold(model, kFold, output_dir=None):
+    """ 
+    Save learned MLP parameters for a CV fold
+    
+    model:
+        
+         Model whose weights are to be stored
+    
+    output_dir:
+        
+        if None: nothing saved; if string then model weights are stored as output_dir+"dnn_weights_fold{}.pt".format(kFold)
+    
+    """
+    if output_dir is None:
+        print("No output directory specified, model parameters will not be saved")
+    else:
+        if not path.exists(output_dir):
+            os.makedirs(output_dir)
+        torch.save(model.state_dict(), path.join(output_dir,"dnn_weights_fold{}.pt".format(kFold)))
+
+def loadDNNSingleFold(num_features, kFold, hparams = {}, input_dir=None):
+    """ 
+    Load learned MLP parameters from one CV split
+    
+    hparams:
+        
+        dictionary with keys as found in _DEFAULT_HYPERPARAMS, or a subset of those keys: all missing keys will be mapped to the default values.
+    
+    input_dir:
+        
+        if None: nothing loaded; if string then model weights are loaded from input_dir+"dnn_weights_fold{}.pt".format(kFold)
+    
+    warm_start_training_model:
+        
+        at <currIter> == 0: will load the model weights in the file located at <warm_start_training_model>
+        
+    i_first_dnn_iter:
+        
+        int: first iteration where dnn is used (usually 0, but use can choose to run LDA or similar as 0th iteration)
+    
+    """
+    tmp_hparams = _DEFAULT_HYPERPARAMS.copy()
+    tmp_hparams.update(hparams)
+    hparams = tmp_hparams.copy()
+    DEVICE = torch.device("cuda:"+str(hparams['dnn_gpu_id']) if torch.cuda.is_available() else "cpu")
+    
+    model = MLP_model(num_input_channels=num_features, number_of_classes = 2, **hparams)
+    model = model.to(DEVICE)
+    if input_dir is  None:
+        return ModelWrapper_like_sklearn(model, DEVICE)
+
+    print('DNNSingleFold: loading previously trained weights', DEVICE)
+    params = torch.load(path.join(input_dir, "dnn_weights_fold{}.pt".format(kFold)))
+    torch_utils.set_model_params(model, params)
+    return ModelWrapper_like_sklearn(model, DEVICE)
 
 if __name__=='__main__':
     TEST_X = label_smoothing_loss(torch.device("cpu"), [1,1], false_positive_loss_factor=2)
