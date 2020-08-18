@@ -368,8 +368,8 @@ def load_pin_scores_tdc(filename, mapIdToScanMass, mapScanMassToId,
                         scoreKey = "score", labelKey = "Label", idKey = "PSMId",
                         writeOutput = False, outputDirectory = None):
     allScores = {}
-    targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
-    decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+    targetCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
+    decoyCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
 
     lineNum = 0
     with open(filename, 'r') as f:
@@ -900,6 +900,24 @@ def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
         _, _, h1 = pylab.hist(x, bins = bins, range = (l,h), density = prob,
                               color = 'b')
         pylab.savefig('%s' % output)
+
+def checkTdcOrMixMax(dataset):
+    _, _, labels, _, sids, expMasses = load_pin_return_featureMatrix(dataset, normalize = False)
+    # Check if a concatendated search was performed
+    tdHash = {}
+    pairCheck = {}
+    for s,em,l in zip(sids, expMasses, labels):
+        k=(s,em,l)
+        pairCheck[(s,em)] = 0
+        if k in tdHash:
+            tdHash[k] += 1
+        else:
+            tdHash[k] = 1
+        if(s,em,-l) in tdHash:
+            pairCheck[k] = 1
+
+    print("%d unique (scan id, exp mass) pairs\n%d pairs with target and decoy psms" % (len(pairCheck), sum([pairCheck[k] for k in pairCheck])))
+    
 
 def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = False, tdcOutputDir = ''):
     '''
