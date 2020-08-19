@@ -9,6 +9,7 @@ See COPYING or http://opensource.org/licenses/OSL-3.0
 
 from __future__ import with_statement
 
+import gzip
 import csv
 import optparse
 import random
@@ -20,6 +21,7 @@ from sklearn import preprocessing
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as lda
 import multiprocessing as mp
+from os.path import splitext
 
 _mp_data = {}
 
@@ -94,6 +96,14 @@ def doMergeScores(thresh, testSets, scores, Y, isSvm = False):
 ################### I/O functions
 #########################################################
 #########################################################
+
+def checkGzip_openfile(filename, mode = 'r'):
+    if splitext(filename)[1] == '.gz':
+        return gzip.open(filename, mode)
+    else:
+        return open(filename, mode)
+
+
 def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
     """ Load all PSMs and features from a percolator PIN file, or any tab-delimited output of a mass-spec experiment with field "Scan" to denote
         the spectrum identification number
@@ -101,7 +111,7 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
         Normal tide features
         SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
     """
-    with open(filename, 'r') as f:
+    with checkGzip_openfile(filename, 'r') as f:
         r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
         headerInOrder = r.fieldnames
         l = headerInOrder
@@ -164,11 +174,11 @@ def givenPsmIds_writePin(filename, psmIdFile):
         Normal tide features
         SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
     """
-    with open(psmIdFile, 'r') as f0:
+    with checkGzip_openfile(psmIdFile, 'r') as f0:
         psms = set([l["PSMId"] for l in csv.DictReader(f0)])
         print("Loaded %d PMS IDs" % len(psms))
 
-    with open(filename, 'r') as f:
+    with checkGzip_openfile(filename, 'r') as f:
         r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
         headerInOrder = r.fieldnames
         l = headerInOrder
@@ -249,7 +259,7 @@ def load_pin_return_featureMatrix(filename, normalize = True):
         ...
         header field m : Protein id m - n - 4
     """
-    f = open(filename, 'r')
+    f = checkGzip_openfile(filename)
     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
     headerInOrder = r.fieldnames
     l = headerInOrder
@@ -383,12 +393,14 @@ def load_pin_return_featureMatrix(filename, normalize = True):
         min_max_scaler = preprocessing.MinMaxScaler()
         return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids, expMasses
 
-def filterPin_givenPsmIds(pinfile, psmIds, outputpin):
+def filterPin_givenPsmIds(pinfile, psmIds, outputpin, gzipOutput = True):
     """ Given Percolator PIN file and set of PSM ids, write
         output pin consisting of feature vectors only belonging to 
         given set of PSM ids
     """
-    with open(pinfile, 'r') as f:
+    writeLines = set([0]) # keep track of what line numbers to write
+
+    with checkGzip_openfile(pinfile, 'r') as f:
         r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
         headerInOrder =  r.fieldnames
         psmId_field = 'SpecId'
@@ -397,15 +409,30 @@ def filterPin_givenPsmIds(pinfile, psmIds, outputpin):
             if psmId_field not in headerInOrder:
                 raise ValueError("No SpecId or PSMId field in PIN file %s, exitting" % (pinfile))
 
-        writeLines = set([0]) # keep track of what line numbers to write
         for i, l in enumerate(r):
             if l[psmId_field] in psmIds:
                 writeLines.add(i+1)
-        f.seek(0)
-        with open(outputpin, 'w') as g:
-            for i,l in enumerate(f):
-                if i in writeLines:
-                    g.write(l)
+
+        if not gzipOutput: # write uncompressed pin file
+            f.seek(0)
+            mode='w'
+            if splitext(outputpin)[1] == '.gz':
+                outputpin = outputpin[:-3]
+            with checkGzip_openfile(outputpin, mode) as g:
+                for i,l in enumerate(f):
+                    if i in writeLines:
+                        g.write(l)
+
+    # have to reopen file in byte mode to directly write to compressed file
+    if gzipOutput: 
+        with checkGzip_openfile(pinfile, 'rb') as f:
+            mode = 'wb'
+            if splitext(outputpin)[1] != '.gz':
+                outputpin += '.gz'
+            with checkGzip_openfile(outputpin, mode) as g:
+                for i,l in enumerate(f):
+                    if i in writeLines:
+                        g.write(l)
 
     return len(writeLines)
 
@@ -499,13 +526,13 @@ def calculateTdcOrMixMax(pepstrings, labels, sids, expMasses):
             psmIdHash.pop(k)
     return set([psmIdHash[k] for k in psmIdHash]) # return set of TDC psm ids
     
-def clean_noncompliant_tdc_pin(pinfile, outputpin):
+def clean_noncompliant_tdc_pin(pinfile, outputpin, gzipOutput = True):
     """ Clean a PIN file containing both mix-max and TDC PSMs, i.e.,
         mix-max - at least one decoy and one target PSM supplied per (scan id, expmass) pair
         TDC - only one PSM (assumed to be the top scoring target or decoy) per (scan id, expmass) pair
     """
     tdcCompliantPsmIds = tdcOrMixMax_pinChecker(pinfile)
-    wroteLines = filterPin_givenPsmIds(pinfile, tdcCompliantPsmIds, outputpin)
+    wroteLines = filterPin_givenPsmIds(pinfile, tdcCompliantPsmIds, outputpin, gzipOutput)
     print("Wrote %d TDC PSMs from %s to %s" % (wroteLines, pinfile, outputpin))
 
 #########################################################
