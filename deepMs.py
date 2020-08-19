@@ -520,7 +520,12 @@ def calculateTdcOrMixMax(pepstrings, labels, sids, expMasses):
         if(s,em,-l) in tdHash:
             pairCheck[(s,em)] = 1
 
-    print("%d unique (scan id, exp mass) pairs\n%d pairs with target and decoy psms" % (len(pairCheck), sum([pairCheck[k] for k in pairCheck])))
+    numTotalSpectra = len(pairCheck)
+    numMixMaxSpectra = sum([pairCheck[k] for k in pairCheck])
+    numTdcSpectra = numTotalSpectra - numMixMaxSpectra
+    print("%d unique (scan id, exp mass) pairs" % (numTotalSpectra))
+    print("%d (scan id, exp mass) pairs with both target and decoy psms (mix-max)" % (numMixMaxSpectra))
+    print("%d (scan id, exp mass) pairs with a single target/decoy psms (assumed TDC, concatenated search output)" % (numTdcSpectra))
     for k in pairCheck:
         if pairCheck[k]:
             psmIdHash.pop(k)
@@ -1245,11 +1250,14 @@ def mainIter(hyperparams):
     ##############
     ##############
 
-    # target_rows: dictionary mapping target sids to rows in the feature matrix
-    # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
+    pepstrings, X, Y, featureNames, sids0, expMasses = load_pin_return_featureMatrix(hyperparams['pin'])
+    # pepstrings: list of tuples (psm id, peptide string, protein id) for each PSM
     # X: standard-normalized feature matrix
     # Y: binary labels, true denoting a target PSM
-    pepstrings, X, Y, featureNames, sids0, _ = load_pin_return_featureMatrix(hyperparams['pin'])
+    # featureNames: list of names for features loaded from pin
+    # sids0: list of scan numbers (ids) from the pin file
+    # expMasses: experimental mass for each PSM in the pin file.  Used for TDC/mix-max post-processing
+
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
     m = l[1] # number of features
@@ -1397,6 +1405,7 @@ if __name__ == '__main__':
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
     parser.add_option('--load_previous_dnn', action= 'store_true', help = 'Start iterations from previously trained model saved in output_dir')
+    parser.add_option('--tdc', action= 'store_true', help = 'Use target-decoy competition to assign q-values.')
     parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
