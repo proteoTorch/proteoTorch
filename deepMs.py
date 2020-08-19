@@ -150,7 +150,7 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
             else:
                 if outputFile2:
                     g2.write(l)
-            if i==0:
+            if i==0: # write header
                 if outputFile2:
                     g2.write(l)
         g.close()
@@ -383,6 +383,32 @@ def load_pin_return_featureMatrix(filename, normalize = True):
         min_max_scaler = preprocessing.MinMaxScaler()
         return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids, expMasses
 
+def filterPin_givenPsmIds(pinfile, psmIds, outputpin):
+    """ Given Percolator PIN file and set of PSM ids, write
+        output pin consisting of feature vectors only belonging to 
+        given set of PSM ids
+    """
+    with open(pinfile, 'r') as f:
+        r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
+        headerInOrder =  r.fieldnames
+        psmId_field = 'SpecId'
+        if psmId_field not in headerInOrder:
+            psmId_field = 'PSMId'
+            if psmId_field not in headerInOrder:
+                raise ValueError("No SpecId or PSMId field in PIN file %s, exitting" % (pinfile))
+
+        writeLines = set([0]) # keep track of what line numbers to write
+        for i, l in enumerate(r):
+            if l[psmId_field] in psmIds:
+                writeLines.add(i+1)
+        f.seek(0)
+        with open(outputpin, 'w') as g:
+            for i,l in enumerate(f):
+                if i in writeLines:
+                    g.write(l)
+
+    return len(writeLines)
+
 def writeIdent(output, scores, Y, pepstrings,sids):
     """ Header is: (1) Kind (2) Sid (3) Peptide (4) Score
     """
@@ -424,6 +450,63 @@ def writeOutput(output, scores, Y, pepstrings,qvals):
     fid.close()
     print("Wrote %d PSMs" % counter)
 
+#########################################################
+#########################################################
+################### Q-value support, 
+################### e.g., check whether a given PIN file
+################### was generated from a concatentated 
+################### mix-max/TDC search
+#########################################################
+#########################################################
+
+def tdcOrMixMax_pinChecker(pinfile):
+    """ Given a Percolator input (PIN) file, find the TDC compliant PSMs
+    """
+    pepstrings, _, labels, _, sids, expMasses = load_pin_return_featureMatrix(pinfile, normalize = False)
+    return calculateTdcOrMixMax(pepstrings, labels, sids, expMasses)
+
+def calculateTdcOrMixMax(pepstrings, labels, sids, expMasses):
+    """ For a PIN file possibly containing both mix-max and TDC PSMs, find the PSMs which
+        are TDC compliant
+
+        Notes: 
+        mix-max - at least one decoy and one target PSM supplied per (scan id, expmass) pair
+        TDC - only one PSM (assumed to be the top scoring target or decoy) per (scan id, expmass) pair
+    """
+    # Check if a concatendated search was performed
+    tdHash = {}
+    pairCheck = {}
+    psmIdHash = {}
+    for p,s,em,l in zip(pepstrings, sids, expMasses, labels):
+        psmIdHash[(s,em)] = p[0]
+        k=(s,em,l)
+        # Add current (sid, expmass) psm, with label l, to has
+        # If the same (sid, expmass) key with negative label -l is in the hash,
+        # then this must come from a concatentated mixmax search.  Otherwise, we
+        # have a unique (sid, examples) key and the corresponding psm is assumed
+        # to come from a TDC search
+        pairCheck[(s,em)] = 0
+        if k in tdHash:
+            tdHash[k] += 1
+        else:
+            tdHash[k] = 1
+        if(s,em,-l) in tdHash:
+            pairCheck[(s,em)] = 1
+
+    print("%d unique (scan id, exp mass) pairs\n%d pairs with target and decoy psms" % (len(pairCheck), sum([pairCheck[k] for k in pairCheck])))
+    for k in pairCheck:
+        if pairCheck[k]:
+            psmIdHash.pop(k)
+    return set([psmIdHash[k] for k in psmIdHash]) # return set of TDC psm ids
+    
+def clean_noncompliant_tdc_pin(pinfile, outputpin):
+    """ Clean a PIN file containing both mix-max and TDC PSMs, i.e.,
+        mix-max - at least one decoy and one target PSM supplied per (scan id, expmass) pair
+        TDC - only one PSM (assumed to be the top scoring target or decoy) per (scan id, expmass) pair
+    """
+    tdcCompliantPsmIds = tdcOrMixMax_pinChecker(pinfile)
+    wroteLines = filterPin_givenPsmIds(pinfile, tdcCompliantPsmIds, outputpin)
+    print("Wrote %d TDC PSMs from %s to %s" % (wroteLines, pinfile, outputpin))
 
 #########################################################
 #########################################################
@@ -646,6 +729,17 @@ def doRand():
 
 
 def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
+    """ Create disjoint cross-validation train and test sets
+
+        Inputs:
+            sids - list of scan ids for each feature row
+            featureMatRowIndices - list of indices corresponding to each sid in 
+                                   global feature matrix
+            folds - number of CV folds
+        Outputs:
+            trainKeys - list of lists, each of which contains the training indices of a CV fold
+            trainKeys - list of lists, each of which contains the testing indices of a CV fold
+    """
     trainKeys = []
     testKeys = []
     for i in range(folds):
@@ -695,7 +789,9 @@ def doLdaSingleFold(thresh, kFold, features, labels, validation_Features, valida
         print("CV finished for fold %d: %d targets identified" % (kFold, len(tp)))
     return validation_scores, len(tp), clf
 
-
+###########
+## Sanity checks for overall workflow
+###########
 def getPercWeights(currIter, kFold):
     """ Weights to debug overall pipeline
         Percolator optimal CV weights for worm01.pin
@@ -807,6 +903,8 @@ def getPercKimWeights(currIter, kFold):
 
 def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, validation_Labels, 
                     cposes, cfracs, alpha, tron = True, currIter=1):
+    """ Train and validate SVMs for different class weights, as is done in Percolator
+    """
     bestTaq = -1.
     bestCp = 1.
     bestCn = 1.
@@ -839,25 +937,14 @@ def doSvmGridSearch(thresh, kFold, features, labels, validation_Features, valida
         print("CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq))
     return topScores, bestTaq, bestClf
 
-def evalSvmCposCnegPair(features, labels, 
-                        validation_Features, validation_Labels,
-                        tron, cpos, cfrac, alpha, thresh, kFold):
-    cneg = cfrac*cpos
-    if tron:
-        classWeight = {1: alpha * cpos, -1: alpha * cneg}
-        clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-7)
-        clf.fit(features, labels)
-        validation_scores = clf.decision_function(validation_Features)
-    else:
-        clf = l2_svm_mfn.solver(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
-        validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
-    tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
-    currentTaq = len(tp)
-    if _debug and _verb > 2:
-        print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
-    return (cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
-
 def evalSvmCposCnegPair_globalDataMatrix(tron, cpos, cfrac, alpha, thresh, kFold):
+    """ Train and validate an SVM for a single (cpos, cneg) class-weight pair, given
+        global training/validation feature matrix and labels for speed
+
+        Used for multithreaded speedups when an SVM is selected as the classifier, i.e.,
+        --method \in [1,2]
+
+    """
     features = _mp_data[(kFold, 'X')]
     labels = _mp_data[(kFold, 'Y')]
     validation_Features = _mp_data[(kFold, 'validation_X')]
@@ -879,6 +966,14 @@ def evalSvmCposCnegPair_globalDataMatrix(tron, cpos, cfrac, alpha, thresh, kFold
 
 def doSvmGridSearch_threaded(thresh, kFold, features, labels, validation_Features, validation_Labels, 
                              cposes, cfracs, alpha, tron = True, currIter=1, numThreads = 1):
+    """ Train and validate SVMs for different class weights, as is done in Percolator.  
+        Calls evalSvmCposCnegPair() to evaluate each class weight pair.
+
+        Uses multithreading for speed, but passing the training/validation feature matrix and labels
+        over and over diminishes performance.  See doIter() for the fully sped up implementation, which 
+        utilizes global access of the training/validation feature matrix and labels and multithreading for
+        speed.
+    """
     bestTaq = -1.
     bestCp = 1.
     bestCn = 1.
@@ -910,6 +1005,27 @@ def doSvmGridSearch_threaded(thresh, kFold, features, labels, validation_Feature
         print("CV finished for fold %d: best cpos = %f, best cneg = %f, %d targets identified" % (kFold, bestCp, bestCn, bestTaq))
     return topScores, bestTaq, bestClf
 
+def evalSvmCposCnegPair(features, labels, 
+                        validation_Features, validation_Labels,
+                        tron, cpos, cfrac, alpha, thresh, kFold):
+    """ Train and validate an SVM for a single (cpos, cneg) class-weight pair, given
+        training/validation feature matrix and labels as inputs
+
+    """
+    cneg = cfrac*cpos
+    if tron:
+        classWeight = {1: alpha * cpos, -1: alpha * cneg}
+        clf = svc(dual = False, fit_intercept = True, class_weight = classWeight, tol = 1e-7)
+        clf.fit(features, labels)
+        validation_scores = clf.decision_function(validation_Features)
+    else:
+        clf = l2_svm_mfn.solver(features, labels, 0, Cn = alpha * cneg, Cp = alpha * cpos)
+        validation_scores = np.dot(validation_Features, clf[:-1]) + clf[-1]
+    tp, _, _ = calcQ(validation_scores, validation_Labels, thresh, True)
+    currentTaq = len(tp)
+    if _debug and _verb > 2:
+        print("CV fold %d: cpos = %f, cneg = %f separated %d validation targets" % (kFold, alpha * cpos, alpha * cneg, currentTaq))
+    return (cpos * alpha, cneg * alpha, currentTaq, np.array(validation_scores), clf)
 
 #########################################################
 #########################################################
@@ -917,7 +1033,8 @@ def doSvmGridSearch_threaded(thresh, kFold, features, labels, validation_Feature
 #########################################################
 #########################################################
 def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
-#    m = len(keys)/3
+    """ Test learned parameters for each CV fold
+    """
     testScores = np.zeros(Y.shape)
     totalTaq = 0
     for kFold, testSids in enumerate(keys):
@@ -930,9 +1047,6 @@ def doTest(thresh, keys, X, Y, trained_models, svmlin = False):
         tp, _, _ = calcQ(testScores[testSids], Y[testSids], thresh, False)
         totalTaq += len(tp)
     return testScores, totalTaq
-
-
-
 
 
 #########################################################
@@ -1052,8 +1166,27 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
 
 
 def mainIter(hyperparams):
-    """
+    """ Analysis workflow proceeds as follows:
+         A) Load PIN file
+         B) Create disjoint cross-validation (CV) training and testing sets as detailed in: 
+            Granholm et al, "A cross-validation scheme for machine learning 
+            algorithms in shotgun proteomics."
+         C) Search for initial score directions in each CV bin/fold
+         D) Further explore initial search space using a large number of 
+            deep snapshot ensembles (optional, true by default)
+         E) Perform semi-supervised learning for input --maxIters, using
+            --method as the underlying classifier which is trained on a CV training
+            fold and tested on the corresponding disjoint test set.
+         F) (TODO) Post-process results using TDC or mix-max q-value estimatation procedures
+         G) Test learned parameters and save final post-processed identifications output_dir/output.txt
     
+         Notes:
+            i) Identifications are currently written after every iteration, i, as
+               output_dir/output_iter%d.txt % (i)
+           ii) If method==3, i.e., a DNN classifier is used, the learned DNN parameters
+               after each iteration are saved as dnn_weights_fold%d.pt % (fold), where fold
+               is the corresponding CV fold
+
     """
     global _seed, _verb
     _seed=hyperparams['seed']
@@ -1078,6 +1211,13 @@ def mainIter(hyperparams):
     if hyperparams['method'] in [1,2]:
         isSvm = True
 
+
+    ##############
+    ##############
+    ## A) Load PIN
+    ##############
+    ##############
+
     # target_rows: dictionary mapping target sids to rows in the feature matrix
     # decoy_rows: dictionary mapping decoy sids to rows in the feature matrix
     # X: standard-normalized feature matrix
@@ -1090,7 +1230,19 @@ def mainIter(hyperparams):
     print("Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio))
     if _debug and _verb >= 3:
         print(featureNames)
+
+    ##############
+    ##############
+    ## B) Create cross-validation bins/folds
+    ##############
+    ##############
+
     trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
+
+    ##############
+    ## Check if we should load previously learned DNNs, 
+    ## in which case we skip initial direction search
+    ##############
 
     initDirectionFound = False
     if hyperparams['load_previous_dnn']:
@@ -1104,6 +1256,14 @@ def mainIter(hyperparams):
             print("Could separate %d identifications" % ( initTaq / 2 ))
             initDirectionFound = True
 
+    ##############
+    ##############
+    ## C) Search for initial direction and
+    ##############
+    ##############
+    ## D) Further explore initial search space using deep snapshot ensembles
+    ##############
+    ##############
     if not initDirectionFound:
         initTaq = 0.
         initDir = hyperparams['initDirection']
@@ -1131,6 +1291,15 @@ def mainIter(hyperparams):
     #     scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
     #                                           dnn_hyperparams=hyperparams, ensemble = hyperparams['deep_direction_ensemble'])
 
+    # Save input parameters
+    mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))
+
+    ##############
+    ##############
+    ## E) Perform semi-supervised learning for --maxIters
+    ##############
+    ##############
+    
     # Iterate
     fp = 0 # current number of identifications
     fpo = 0 # number of identifications from previous iteration
@@ -1156,20 +1325,29 @@ def mainIter(hyperparams):
         fpoo = fpo
         fpo = fp
 
-        # write output for iteration
-        isSvmlin = (hyperparams['method']==2)
-        testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
-        testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
-        taq, _, qs = calcQ(testScores, Y, q, False)
-        if not _identOutput:
-            writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
-        else:
-            writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
-        # save current models
-        if hyperparams['method']==3:
-            for fold, clf in enumerate(trained_models):
+        if 1: # todo: add user input parameter to turn this off/on.  Consider only saving output identifications files
+              # only every N iterations, as output files per every iteration can eat up alot of disk space
+            # write output for iteration
+            isSvmlin = (hyperparams['method']==2)
+            testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
+            testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
+            taq, _, qs = calcQ(testScores, Y, q, False)
+            if not _identOutput:
+                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+            else:
+                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
+            # save current models
+            if hyperparams['method']==3:
+                for fold, clf in enumerate(trained_models):
                     dnn_code.saveDNNSingleFold(clf.get_single_model(), fold, output_dir)
 
+    ##############
+    ##############
+    ## G) Test learned parameters and save final identifications
+    ##############
+    ##############
+
+    # Test learned parameters
     isSvmlin = (hyperparams['method']==2)
     testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
     print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
@@ -1177,7 +1355,6 @@ def mainIter(hyperparams):
         scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
-    mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))
     if not _identOutput:
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
     else:
@@ -1192,7 +1369,6 @@ if __name__ == '__main__':
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
-    parser.add_option('--tol', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--load_previous_dnn', action= 'store_true', help = 'Start iterations from previously trained model saved in output_dir')
     parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
