@@ -535,6 +535,8 @@ def clean_noncompliant_tdc_pin(pinfile, outputpin, gzipOutput = True):
     """ Clean a PIN file containing both mix-max and TDC PSMs, i.e.,
         mix-max - at least one decoy and one target PSM supplied per (scan id, expmass) pair
         TDC - only one PSM (assumed to be the top scoring target or decoy) per (scan id, expmass) pair
+
+        Note - we could also accept an initial direction to prune mix-max PSMs...
     """
     tdcCompliantPsmIds = tdcOrMixMax_pinChecker(pinfile)
     wroteLines = filterPin_givenPsmIds(pinfile, tdcCompliantPsmIds, outputpin, gzipOutput)
@@ -1196,6 +1198,43 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     estTaq /= 2
     return newScores, estTaq, clfs, np.mean(all_AUCs)
 
+def tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses):
+    """ Perform competition between max scoring target and decoy PSM per (scan id, expmass) pair
+        Inputs:
+           scores - np array of recalibrated scores for each PSM in the original PIN file
+           Y - np array of labels
+           pepstrings - list of tuples (psm id, peptide string, protein id) for each PSM
+           sids0 - list of scan numbers (ids) from the pin file
+           expMasses - experimental mass for each PSM in the pin file
+    """
+    print("Performing target-decoy competition on %d PSMs" % (len(scores)))
+    sidExpmassScores = {}
+    sidExpmassInds = {} # original index of top (scan id, expmass) PSM
+    for i, (s,y,p,sid,em) in enumerate(zip(scores, Y, pepstrings, sids0, expMasses)):
+        k = (sid, em)
+        if k in sidExpmassScores:
+            if s > sidExpmassScores[k]:
+                sidExpmassScores[k] = s
+                sidExpmassInds[k] = i
+        else:
+            sidExpmassScores[k] = s
+            sidExpmassInds[k] = i
+
+    indSidEm_triples = sorted([(sidExpmassInds[sid, em], sid, em) for sid, em in sidExpmassInds], key = lambda r: r[0])
+    newScores = np.array([sidExpmassScores[(sid,em)] for _, sid, em in indSidEm_triples])
+    oldToNewMapping = [i for i,_,_ in indSidEm_triples]
+    newY = Y[oldToNewMapping]
+    newPepstrings = [pepstrings[i] for i in oldToNewMapping]
+    newSids = [sids0[i] for i in oldToNewMapping]
+    newExpMasses = [expMasses[i] for i in oldToNewMapping]
+
+    a = len(indSidEm_triples)
+    numTdcTargets = np.sum([y==1 for y in newY])
+    numTdcDecoys = a - numTdcTargets
+    print("Chose best-scoring PSM per (scan number, expmass) pair")
+    print("%d unique (scan number, expmass) pairs, %d target PSMs and %d decoy PSMs" % (a, numTdcTargets, numTdcDecoys))
+    
+    return newScores, newY, newPepstrings, newSids, newExpMasses, oldToNewMapping
 
 def mainIter(hyperparams):
     """ Analysis workflow proceeds as follows:
@@ -1386,17 +1425,23 @@ def mainIter(hyperparams):
     isSvmlin = (hyperparams['method']==2)
     testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
     print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
-    if _mergescore:
-        scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
+
+    scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
+
+    if hyperparams['tdc']:
+        scores, Y, pepstrings, sids0, expMasses, oldToNewMapping = tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses)
+        taq, _, qs = calcQ(scores, Y, q, False)
+        print("Could identify %d targets after target-decoy competition" % (len(taq)))
+            
     if not _identOutput:
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
     else:
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, sids0)
-    return None, validation_AUC, AUC_fn_001(testScores, Y), output_dir
+    return None, validation_AUC, AUC_fn_001(scores, Y), output_dir
 
-
+    
 
 
 if __name__ == '__main__':
