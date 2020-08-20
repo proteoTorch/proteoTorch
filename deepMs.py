@@ -1352,19 +1352,6 @@ def mainIter(hyperparams):
             scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
                                                   dnn_hyperparams=hyperparams, ensemble = hyperparams['deep_direction_ensemble'])
 
-    # initTaq = 0.
-    # initDir = hyperparams['initDirection']
-    # if initDir > -1 and initDir < m:
-    #     print("Using specified initial direction %d" % (initDir))
-    #     scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
-    # else:
-    #     scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
-    # print("Could initially separate %d identifications" % ( initTaq / 2 ))
-    # if hyperparams['deepInitDirection']:
-    #     print("Performing deep initial direction search")
-    #     scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
-    #                                           dnn_hyperparams=hyperparams, ensemble = hyperparams['deep_direction_ensemble'])
-
     # Save input parameters
     mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))
 
@@ -1406,14 +1393,25 @@ def mainIter(hyperparams):
             testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
             testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
             taq, _, qs = calcQ(testScores, Y, q, False)
-            if not _identOutput:
-                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+            if hyperparams['tdc']:
+                testScores, tdcY, tdcpepstrings, tdcsids0, tdcexpMasses, _ = tdcPostProcessing(testScores, Y, pepstrings, sids0, expMasses)
+                taq, _, qs = calcQ(testScores, tdcY, q, False)
+                print("Could identify %d targets after target-decoy competition" % (len(taq)))
+
+                if not _identOutput:
+                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, tdcY, tdcpepstrings, qs)
+                else:
+                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, tdcY, tdcpepstrings, tdcsids0)
             else:
-                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
-            # save current models
-            if hyperparams['method']==3:
-                for fold, clf in enumerate(trained_models):
-                    dnn_code.saveDNNSingleFold(clf.get_single_model(), fold, output_dir)
+                if not _identOutput:
+                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+                else:
+                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
+
+        # save current iteration's trained model parameters
+        if hyperparams['method']==3:
+            for fold, clf in enumerate(trained_models):
+                dnn_code.saveDNNSingleFold(clf.get_single_model(), fold, output_dir)
 
     ##############
     ##############
