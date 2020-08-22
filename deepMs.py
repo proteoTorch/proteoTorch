@@ -652,6 +652,22 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
             scores.append(currScores)
     return scores, initTaq
 
+def splitMergedScores(keys, mergedScores, Y, q):
+    """ Given merged vector of all PSM scores, split into the CV bins and calculate the identified
+        targets at the specified q-value
+    """
+    initTaq = 0.
+    scores = []
+    # Add check for whether scores multiplied by +1 or -1 is best
+    # split dataset into thirds for testing/training
+    for kFold, trainSids in enumerate(keys):
+        currScores = [mergedScores[sid] for sid in trainSids]
+        taq, _, _ = calcQ(currScores, Y[trainSids], q, True)
+        initTaq += len(taq)
+        print("CV fold %d: could separate %d PSMs" % (kFold, len(taq)))
+        scores.append(currScores)
+    return scores, initTaq
+
 def load_and_score_dnns(thresh, keys, X, Y, hparams = {}, input_dir = None):
     """ Load dnns and generate test scores
     """
@@ -1248,7 +1264,7 @@ def mainIter(hyperparams):
          E) Perform semi-supervised learning for input --maxIters, using
             --method as the underlying classifier which is trained on a CV training
             fold and tested on the corresponding disjoint test set.
-         F) (TODO) Post-process results using TDC or mix-max q-value estimatation procedures
+         F) Post-process results using TDC or (TODO) mix-max q-value estimatation procedures
          G) Test learned parameters and save final post-processed identifications output_dir/output.txt
     
          Notes:
@@ -1376,6 +1392,7 @@ def mainIter(hyperparams):
     for i in range(hyperparams['maxIters']):
         if i>0:
             hyperparams['dnn_dropout_rate'] = drop_out_rate
+
         scores, fp, trained_models, validation_AUC = doIter(
             q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
             dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'])
@@ -1393,6 +1410,13 @@ def mainIter(hyperparams):
             testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
             testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
             taq, _, qs = calcQ(testScores, Y, q, False)
+
+            ##############
+            ##############
+            ## F) Post-process results using TDC or (TODO) mix-max q-value estimatation procedures
+            ##############
+            ##############
+
             if hyperparams['tdc']:
                 testScores, tdcY, tdcpepstrings, tdcsids0, tdcexpMasses, _ = tdcPostProcessing(testScores, Y, pepstrings, sids0, expMasses)
                 taq, _, qs = calcQ(testScores, tdcY, q, False)
@@ -1432,12 +1456,210 @@ def mainIter(hyperparams):
         scores, Y, pepstrings, sids0, expMasses, oldToNewMapping = tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses)
         taq, _, qs = calcQ(scores, Y, q, False)
         print("Could identify %d targets after target-decoy competition" % (len(taq)))
+        X = X[oldToNewMapping]
             
     if not _identOutput:
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
     else:
         writeOutput(output_dir+'output.txt', scores, Y, pepstrings, sids0)
-    return None, validation_AUC, AUC_fn_001(scores, Y), output_dir
+    return scores, X, Y, pepstrings, sids0, expMasses
+    # return None, validation_AUC, AUC_fn_001(scores, Y), output_dir
+
+def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
+    """ Analysis workflow proceeds as follows:
+         A) Normalize input features
+         B) Create disjoint cross-validation (CV) training and testing sets as detailed in: 
+            Granholm et al, "A cross-validation scheme for machine learning 
+            algorithms in shotgun proteomics."
+         C) Search for initial score directions in each CV bin/fold
+         D) Further explore initial search space using a large number of 
+            deep snapshot ensembles (optional, true by default)
+         E) Perform semi-supervised learning for input --maxIters, using
+            --method as the underlying classifier which is trained on a CV training
+            fold and tested on the corresponding disjoint test set.
+         F) Post-process results using TDC or (TODO) mix-max q-value estimatation procedures
+         G) Test learned parameters and save final post-processed identifications output_dir/output.txt
+    
+         Notes:
+            i) Identifications are currently written after every iteration, i, as
+               output_dir/output_iter%d.txt % (i)
+           ii) If method==3, i.e., a DNN classifier is used, the learned DNN parameters
+               after each iteration are saved as dnn_weights_fold%d.pt % (fold), where fold
+               is the corresponding CV fold
+
+    """
+    global _seed, _verb
+    _seed=hyperparams['seed']
+    _verb=hyperparams['verbose']
+
+    if hyperparams['method']==2 and not svmlinReady:
+        print("Selected method 2, SVM learning with L2-SVM-MFN,")
+        print("but this solver could be found.  Please build this solver")
+        print("in the solvers directory or select a different method.")
+        exit(-1)
+    q = hyperparams['q']
+
+    output_dir = hyperparams['output_dir']
+    if output_dir is None:
+        output_dir = 'model_output/{}/{}/'.format(hyperparams['pin'].split('/')[-1], mini_utils.TimeStamp())
+    else:
+        if not output_dir[-1]=='/':
+            output_dir = output_dir + '/'
+    mini_utils.mkdir(output_dir)
+    
+    isSvm = False
+    if hyperparams['method'] in [1,2]:
+        isSvm = True
+
+    ##############
+    ##############
+    ## A) Normalize input features
+    ##############
+    ##############
+    if _standardNorm:
+        preprocessing.scale(X, copy = False)
+    else:
+        min_max_scaler = preprocessing.MinMaxScaler()
+        min_max_scaler.fit_transform(X, copy = False)
+
+    sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
+    l = X.shape
+    m = l[1] # number of features
+    targetDecoyRatio, numT, numD = calculateTargetDecoyRatio(Y)
+    print("Loaded %d target and %d decoy PSMS with %d features, ratio = %f" % (numT, numD, l[1], targetDecoyRatio))
+    if _debug and _verb >= 3:
+        print(featureNames)
+
+    ##############
+    ##############
+    ## B) Create cross-validation bins/folds
+    ##############
+    ##############
+
+    trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
+
+    # ##############
+    # ## Check if we should load previously learned DNNs, 
+    # ## in which case we skip initial direction search
+    # ##############
+
+    # initDirectionFound = False
+    # if hyperparams['load_previous_dnn']:
+    #     input_dir = hyperparams['previous_dnn_dir']
+    #     if input_dir is not None:
+    #         if not input_dir[-1]=='/':
+    #             input_dir = input_dir + '/'
+
+    #         print("Loading previously trained models")
+    #         scores, initTaq = load_and_score_dnns(q, trainKeys, X, Y, hyperparams, input_dir)
+    #         print("Could separate %d identifications" % ( initTaq / 2 ))
+    #         initDirectionFound = True
+
+    ##############
+    ##############
+    ## C) Split the merged scores from mainIter
+    ##############
+    scores, initTaq = splitMergedScores(trainKeys, scores, Y, q)
+
+    ##############
+    ##############
+    ## C) Search for initial direction and
+    ##############
+    ##############
+    ## D) Further explore initial search space using deep snapshot ensembles
+    ##############
+    ##############
+    if 0: # not initDirectionFound:
+        initTaq = 0.
+        initDir = hyperparams['initDirection']
+        if initDir > -1 and initDir < m:
+            print("Using specified initial direction %d" % (initDir))
+            scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
+        else:
+            scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
+        print("Could initially separate %d identifications" % ( initTaq / 2 ))
+        if hyperparams['deepInitDirection']:
+            print("Performing deep initial direction search")
+            scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
+                                                  dnn_hyperparams=hyperparams, ensemble = hyperparams['deep_direction_ensemble'])
+
+    # # Save input parameters
+    # mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))
+
+    ##############
+    ##############
+    ## E) Perform semi-supervised learning for --maxIters
+    ##############
+    ##############
+    
+    # Iterate
+    fp = 0 # current number of identifications
+    fpo = 0 # number of identifications from previous iteration
+    fpoo = 0 # number of identifications from previous, previous iteration
+    trained_models = []
+    drop_out_rate = hyperparams['dnn_dropout_rate']
+    hyperparams['dnn_dropout_rate'] = hyperparams['starting_dropout_rate']
+    if hyperparams['method'] == 3:
+        q = hyperparams['deepq']
+    else:
+        q = hyperparams['q']
+
+    for i in range(hyperparams['maxIters']):
+        if i>0:
+            hyperparams['dnn_dropout_rate'] = drop_out_rate
+
+        scores, fp, trained_models, validation_AUC = doIter(
+            q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
+            dnn_hyperparams=hyperparams, prev_iter_models = trained_models, numThreads = hyperparams['numThreads'])
+        print("Iter %d: estimated %d targets <= q = %f" % (i, fp, q))
+        if _convergeCheck and fp > 0 and fpoo > 0 and (float(fp - fpoo) <= float(fpoo * _reqIncOver2Iters)):
+            print("Algorithm seems to have converged over past two itertions, (%d vs %d)" % (fp, fpoo))
+            break
+        fpoo = fpo
+        fpo = fp
+
+        if 1: # todo: add user input parameter to turn this off/on.  Consider only saving output identifications files
+              # only every N iterations, as output files per every iteration can eat up alot of disk space
+            # write output for iteration
+            isSvmlin = (hyperparams['method']==2)
+            testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
+            testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
+            taq, _, qs = calcQ(testScores, Y, q, False)
+            if not _identOutput:
+                writeOutput(output_dir+'output_posttdc_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+            else:
+                writeOutput(output_dir+'output_posttdc_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
+
+        # # save current iteration's trained model parameters
+        # if hyperparams['method']==3:
+        #     for fold, clf in enumerate(trained_models):
+        #         dnn_code.saveDNNSingleFold(clf.get_single_model(), fold, output_dir)
+
+    ##############
+    ##############
+    ## G) Test learned parameters and save final identifications
+    ##############
+    ##############
+
+    # Test learned parameters
+    isSvmlin = (hyperparams['method']==2)
+    testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
+    print("Identified %d targets <= %f pre-merge." % (numIdentified, q))
+
+    scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
+    taq, _, qs = calcQ(scores, Y, q, False)
+    print("Could identify %d targets" % (len(taq)))
+
+    # if hyperparams['tdc']:
+    #     scores, Y, pepstrings, sids0, expMasses, oldToNewMapping = tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses)
+    #     taq, _, qs = calcQ(scores, Y, q, False)
+    #     print("Could identify %d targets after target-decoy competition" % (len(taq)))
+            
+    if not _identOutput:
+        writeOutput(output_dir+'output_posttdc.txt', scores, Y, pepstrings, qs)
+    else:
+        writeOutput(output_dir+'output_posttdc.txt', scores, Y, pepstrings, sids0)
+    return 0
 
     
 
@@ -1481,4 +1703,7 @@ if __name__ == '__main__':
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'adam', help='DNN solver to use.')
     (_options, _args) = parser.parse_args()
     
-    mainIter(_options.__dict__)
+    params = _options.__dict__
+    scores, X, Y, pepstrings, sids0, expMasses = mainIter(params)
+    if params["tdc"]:
+        postTdc(params, scores, X, Y, pepstrings, sids0, expMasses)
