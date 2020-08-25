@@ -51,7 +51,7 @@ AUC_fn_001 = mini_utils.AUC_up_to_tol_singleQ(0.01)
 #########################################################
 _identOutput=False
 _debug=True
-_verb=0
+# _verb=0
 _mergescore=True
 _includeNegativesInResult=True
 _standardNorm=True
@@ -652,7 +652,7 @@ def givenInitialDirection_split(keys, X, Y, q, featureNames, initDir):
             scores.append(currScores)
     return scores, initTaq
 
-def splitMergedScores(keys, mergedScores, Y, q):
+def splitScoresByCvBins(keys, mergedScores, Y, q):
     """ Given merged vector of all PSM scores, split into the CV bins and calculate the identified
         targets at the specified q-value
     """
@@ -1275,13 +1275,9 @@ def mainIter(hyperparams):
                is the corresponding CV fold
 
     """
-    global _seed, _verb
-    _seed=hyperparams['seed']
-    _verb=hyperparams['verbose']
-
     if hyperparams['method']==2 and not svmlinReady:
         print("Selected method 2, SVM learning with L2-SVM-MFN,")
-        print("but this solver could be found.  Please build this solver")
+        print("but this solver could not be found.  Please build this solver")
         print("in the solvers directory or select a different method.")
         exit(-1)
 
@@ -1422,15 +1418,9 @@ def mainIter(hyperparams):
                 taq, _, qs = calcQ(testScores, tdcY, q, False)
                 print("Could identify %d targets after target-decoy competition" % (len(taq)))
 
-                if not _identOutput:
-                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, tdcY, tdcpepstrings, qs)
-                else:
-                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, tdcY, tdcpepstrings, tdcsids0)
+                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, tdcY, tdcpepstrings, qs)
             else:
-                if not _identOutput:
-                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
-                else:
-                    writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
+                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
 
         # save current iteration's trained model parameters
         if hyperparams['method']==3:
@@ -1458,12 +1448,9 @@ def mainIter(hyperparams):
         print("Could identify %d targets after target-decoy competition" % (len(taq)))
         X = X[oldToNewMapping]
             
-    if not _identOutput:
-        writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
-    else:
-        writeOutput(output_dir+'output.txt', scores, Y, pepstrings, sids0)
+    writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
+
     return scores, X, Y, pepstrings, sids0, expMasses
-    # return None, validation_AUC, AUC_fn_001(scores, Y), output_dir
 
 def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
     """ Analysis workflow proceeds as follows:
@@ -1488,13 +1475,9 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
                is the corresponding CV fold
 
     """
-    global _seed, _verb
-    _seed=hyperparams['seed']
-    _verb=hyperparams['verbose']
-
     if hyperparams['method']==2 and not svmlinReady:
         print("Selected method 2, SVM learning with L2-SVM-MFN,")
-        print("but this solver could be found.  Please build this solver")
+        print("but this solver could not be found.  Please build this solver")
         print("in the solvers directory or select a different method.")
         exit(-1)
     q = hyperparams['q']
@@ -1537,58 +1520,11 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
     ##############
 
     trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
-
-    # ##############
-    # ## Check if we should load previously learned DNNs, 
-    # ## in which case we skip initial direction search
-    # ##############
-
-    # initDirectionFound = False
-    # if hyperparams['load_previous_dnn']:
-    #     input_dir = hyperparams['previous_dnn_dir']
-    #     if input_dir is not None:
-    #         if not input_dir[-1]=='/':
-    #             input_dir = input_dir + '/'
-
-    #         print("Loading previously trained models")
-    #         scores, initTaq = load_and_score_dnns(q, trainKeys, X, Y, hyperparams, input_dir)
-    #         print("Could separate %d identifications" % ( initTaq / 2 ))
-    #         initDirectionFound = True
+    scores, initTaq = splitScoresByCvBins(trainKeys, scores, Y, q)
 
     ##############
     ##############
-    ## C) Split the merged scores from mainIter
-    ##############
-    scores, initTaq = splitMergedScores(trainKeys, scores, Y, q)
-
-    ##############
-    ##############
-    ## C) Search for initial direction and
-    ##############
-    ##############
-    ## D) Further explore initial search space using deep snapshot ensembles
-    ##############
-    ##############
-    if 0: # not initDirectionFound:
-        initTaq = 0.
-        initDir = hyperparams['initDirection']
-        if initDir > -1 and initDir < m:
-            print("Using specified initial direction %d" % (initDir))
-            scores, initTaq = givenInitialDirection_split(trainKeys, X, Y, q, featureNames, initDir)
-        else:
-            scores, initTaq = searchForInitialDirection_split(trainKeys, X, Y, q, featureNames, hyperparams['numThreads'])
-        print("Could initially separate %d identifications" % ( initTaq / 2 ))
-        if hyperparams['deepInitDirection']:
-            print("Performing deep initial direction search")
-            scores, initTaq = deepDirectionSearch(trainKeys, scores, X, Y,
-                                                  dnn_hyperparams=hyperparams, ensemble = hyperparams['deep_direction_ensemble'])
-
-    # # Save input parameters
-    # mini_utils.save_text(output_dir+'hparams.txt', str(hyperparams))
-
-    ##############
-    ##############
-    ## E) Perform semi-supervised learning for --maxIters
+    ## C) Perform semi-supervised learning for --maxIters
     ##############
     ##############
     
@@ -1625,10 +1561,7 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
             testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
             testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
             taq, _, qs = calcQ(testScores, Y, q, False)
-            if not _identOutput:
-                writeOutput(output_dir+'output_posttdc_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
-            else:
-                writeOutput(output_dir+'output_posttdc_iter' + str(i) + '.txt', testScores, Y, pepstrings, sids0)
+            writeOutput(output_dir+'output_posttdc_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
 
         # # save current iteration's trained model parameters
         # if hyperparams['method']==3:
@@ -1637,7 +1570,7 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
 
     ##############
     ##############
-    ## G) Test learned parameters and save final identifications
+    ## D) Test learned parameters and save final identifications
     ##############
     ##############
 
@@ -1649,16 +1582,8 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
     scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
-
-    # if hyperparams['tdc']:
-    #     scores, Y, pepstrings, sids0, expMasses, oldToNewMapping = tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses)
-    #     taq, _, qs = calcQ(scores, Y, q, False)
-    #     print("Could identify %d targets after target-decoy competition" % (len(taq)))
             
-    if not _identOutput:
-        writeOutput(output_dir+'output_posttdc.txt', scores, Y, pepstrings, qs)
-    else:
-        writeOutput(output_dir+'output_posttdc.txt', scores, Y, pepstrings, sids0)
+    writeOutput(output_dir+'output_posttdc.txt', scores, Y, pepstrings, qs)
     return 0
 
     
@@ -1702,8 +1627,13 @@ if __name__ == '__main__':
     parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 4.0, help='Multiplicative factor to weight false positives')
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'adam', help='DNN solver to use.')
     (_options, _args) = parser.parse_args()
-    
+
     params = _options.__dict__
+
+    global _verb, _seed
+    _verb = params['verbose']
+    _seed=params['seed']
+
     scores, X, Y, pepstrings, sids0, expMasses = mainIter(params)
     if params["tdc"]:
         postTdc(params, scores, X, Y, pepstrings, sids0, expMasses)
