@@ -14,6 +14,7 @@ import csv
 import optparse
 import random
 
+from os.path import join as _join
 from sklearn.utils import check_random_state
 from copy import deepcopy
 from sklearn.svm import LinearSVC as svc
@@ -1399,6 +1400,7 @@ def mainIter(hyperparams):
         fpoo = fpo
         fpo = fp
 
+        # if write_output_per_iter and (i+1) % hyperparams['output_per_iter_granularity'] == 0:
         if 1: # todo: add user input parameter to turn this off/on.  Consider only saving output identifications files
               # only every N iterations, as output files per every iteration can eat up alot of disk space
             # write output for iteration
@@ -1417,10 +1419,10 @@ def mainIter(hyperparams):
                 testScores, tdcY, tdcpepstrings, tdcsids0, tdcexpMasses, _ = tdcPostProcessing(testScores, Y, pepstrings, sids0, expMasses)
                 taq, _, qs = calcQ(testScores, tdcY, q, False)
                 print("Could identify %d targets after target-decoy competition" % (len(taq)))
-
-                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, tdcY, tdcpepstrings, qs)
+                writeOutput(_join(output_dir, 'output_preTDC_iter' + str(i) + '.txt'), testScores, tdcY, tdcpepstrings, qs)
             else:
-                writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+                # writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+                writeOutput(_join(output_dir,'output_iter' + str(i) + '.txt'), testScores, Y, pepstrings, qs)
 
         # save current iteration's trained model parameters
         if hyperparams['method']==3:
@@ -1447,8 +1449,9 @@ def mainIter(hyperparams):
         taq, _, qs = calcQ(scores, Y, q, False)
         print("Could identify %d targets after target-decoy competition" % (len(taq)))
         X = X[oldToNewMapping]
-            
-    writeOutput(output_dir+'output.txt', scores, Y, pepstrings, qs)
+    else:         
+        # Save final identifications
+        writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
 
     return scores, X, Y, pepstrings, sids0, expMasses
 
@@ -1554,6 +1557,7 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
         fpoo = fpo
         fpo = fp
 
+        # if write_output_per_iter and (i+1) % hyperparams['output_per_iter_granularity'] == 0:
         if 1: # todo: add user input parameter to turn this off/on.  Consider only saving output identifications files
               # only every N iterations, as output files per every iteration can eat up alot of disk space
             # write output for iteration
@@ -1561,12 +1565,12 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
             testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
             testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
             taq, _, qs = calcQ(testScores, Y, q, False)
-            writeOutput(output_dir+'output_posttdc_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
+            writeOutput(_join(output_dir, 'output_iter' + str(i) + '.txt'), testScores, Y, pepstrings, qs)
 
-        # # save current iteration's trained model parameters
-        # if hyperparams['method']==3:
-        #     for fold, clf in enumerate(trained_models):
-        #         dnn_code.saveDNNSingleFold(clf.get_single_model(), fold, output_dir)
+        # save current iteration's trained model parameters
+        if hyperparams['method']==3:
+            for fold, clf in enumerate(trained_models):
+                dnn_code.saveDNNSingleFold(clf.get_single_model(), fold, output_dir, filebase = 'dnn_tdc_weights')
 
     ##############
     ##############
@@ -1583,7 +1587,7 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
             
-    writeOutput(output_dir+'output_posttdc.txt', scores, Y, pepstrings, qs)
+    writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
     return 0
 
     
@@ -1597,6 +1601,8 @@ if __name__ == '__main__':
     parser.add_option('--load_previous_dnn', action= 'store_true', help = 'Start iterations from previously trained model saved in output_dir')
     parser.add_option('--tdc', action= 'store_true', help = 'Use target-decoy competition to assign q-values.')
     parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
+    parser.add_option('--do_not_write_output_per_iter', action= 'store_true', help = 'Do not write recalibrated psms after every X iterations, where X = --output_per_iter_granularity.')
+    parser.add_option('--output_per_iter_granularity', type = 'int', action= 'store', default = 5, help = 'Number of iterations to write recalibrated psms.')
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--numThreads', type = 'int', action= 'store', default=1)

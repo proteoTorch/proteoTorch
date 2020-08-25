@@ -254,7 +254,7 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     return test_pred, len(tp), ModelWrapper_like_sklearn(model, DEVICE)
 
 
-def saveDNNSingleFold(model, kFold, output_dir=None):
+def saveDNNSingleFold(model, kFold, output_dir=None, filebase = 'dnn_weights_fold'):
     """ 
     Save learned MLP parameters for a CV fold
     
@@ -272,7 +272,7 @@ def saveDNNSingleFold(model, kFold, output_dir=None):
     else:
         if not path.exists(output_dir):
             os.makedirs(output_dir)
-        torch.save(model.state_dict(), path.join(output_dir,"dnn_weights_fold{}.pt".format(kFold)))
+        torch.save(model.state_dict(), path.join(output_dir,filebase + str(kFold) + '.pt'))
 
 def loadDNNSingleFold(num_features, kFold, hparams = {}, input_dir=None):
     """ 
