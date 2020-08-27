@@ -394,6 +394,82 @@ def load_pin_return_featureMatrix(filename, normalize = True):
         min_max_scaler = preprocessing.MinMaxScaler()
         return pepstrings, min_max_scaler.fit_transform(np.array(X)), np.array(Y), featureNames, sids, expMasses
 
+def load_pin_return_scanExpmassPairs(filename):
+    """ Load PSM scan nr, expmass info without loading feature matrix.  Used for fast TDC post-processing and plotting results
+        
+        For n input features and m total file fields, the file format is:
+        header field 1: SpecId, or other PSM id
+        header field 2: Label, denoting whether the PSM is a target or decoy
+        header field 3: ScanNr, the scan number.  Note this string must be exactly stated
+        header field 4 (optional): ExpMass, PSM experimental mass.  Not used as a feature
+        header field 4 + 1 : Input feature 1
+        header field 4 + 2 : Input feature 2
+        ...
+        header field 4 + n : Input feature n
+        header field 4 + n + 1 : Peptide, the peptide string
+        header field 4 + n + 2 : Protein id 1
+        header field 4 + n + 3 : Protein id 2
+        ...
+        header field m : Protein id m - n - 4
+    """
+    f = checkGzip_openfile(filename)
+    r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
+    headerInOrder = r.fieldnames
+    l = headerInOrder
+    sids = [] # keep track of spectrum IDs and exp masses for FDR post-processing
+    expMasses = [] 
+    # Check that header fields follow pin schema
+    # spectrum identification key for PIN files
+    # Note: this string must be stated exactly as the third header field
+    sidKey = "ScanNr"
+    if sidKey not in l:
+        raise ValueError("No %s field, exitting" % (sidKey))
+    expMassKey = "ExpMass"
+    if expMassKey not in l:
+        raise ValueError("No %s field, exitting" % (expMassKey))
+    constKeys = [l[0]]
+
+    # Check label
+    m = l[1]
+    if m.lower() == 'label':
+        constKeys.append(l[1])
+    # Exclude calcmass and expmass as features
+    constKeys += [sidKey, "CalcMass", "ExpMass"]
+    # Find peptide and protein ID fields
+    psmStrings = [l[0]]
+    isConstKey = False
+    for key in headerInOrder:
+        m = key.lower()
+        if m=="peptide":
+            isConstKey = True
+        if isConstKey:
+            constKeys.append(key)
+            psmStrings.append(key)    
+    
+    Y = [] # labels
+    pepstrings = []
+    numRows = 0
+    for i, l in enumerate(r):
+        try:
+            sid = int(l[sidKey])
+        except ValueError:
+            print("Could not convert scan number %s on line %d to int, exitting" % (l[sidKey], i+1))
+        expMass = l[expMassKey]
+        try:
+            y = int(l["Label"])
+        except ValueError:
+            print("Could not convert label %s on line %d to int, exitting" % (l["Label"], i+1))
+        if y != 1 and y != -1:
+            print("Error: encountered label value %d on line %d, can only be -1 or 1, exitting" % (y, i+1))
+            exit(-1)
+        el_strings = [l[k] for k in psmStrings]
+        Y.append(y)
+        pepstrings.append(el_strings)
+        sids.append(sid)
+        expMasses.append(expMass)
+    f.close()
+    return pepstrings, np.array(Y), sids, expMasses
+
 def filterPin_givenPsmIds(pinfile, psmIds, outputpin, gzipOutput = True):
     """ Given Percolator PIN file and set of PSM ids, write
         output pin consisting of feature vectors only belonging to 
@@ -778,6 +854,10 @@ def doRand():
     _seed=(_seed * 279470273) % 4294967291
     return _seed
 
+# def doRand(seed):
+#     seed=(seed * 279470273) % 4294967291
+#     return seed
+
 
 def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
     """ Create disjoint cross-validation train and test sets
@@ -803,14 +883,17 @@ def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
         remain.append(len(sids) / folds)
     prevSid = sids[0]
     # seed = doRand(seed)
+    # randIdx = seed % folds
     randIdx = doRand() % folds
     it = 0
     for k,sid in list(zip(featureMatRowIndices, sids)):
         if (sid!=prevSid):
             # seed = doRand(seed)
+            # randIdx = seed % folds
             randIdx = doRand() % folds
             while remain[randIdx] <= 0:
                 # seed = doRand(seed)
+                # randIdx = seed % folds
                 randIdx = doRand() % folds
         for i in range(folds):
             if i==randIdx:
@@ -1215,7 +1298,7 @@ def doIter(thresh, keys, scores, X, Y, targetDecoyRatio, method = 0, currIter=1,
     estTaq /= 2
     return newScores, estTaq, clfs, np.mean(all_AUCs)
 
-def tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses):
+def targetDecoyCompetition(scores, Y, pepstrings, sids0, expMasses):
     """ Perform competition between max scoring target and decoy PSM per (scan id, expmass) pair
         Inputs:
            scores - np array of recalibrated scores for each PSM in the original PIN file
@@ -1225,9 +1308,9 @@ def tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses):
            expMasses - experimental mass for each PSM in the pin file
     """
     print("Performing target-decoy competition on %d PSMs" % (len(scores)))
-    sidExpmassScores = {}
+    sidExpmassScores = {} # max scores per (scan id, expmass) pairs
     sidExpmassInds = {} # original index of top (scan id, expmass) PSM
-    for i, (s,y,p,sid,em) in enumerate(zip(scores, Y, pepstrings, sids0, expMasses)):
+    for i, (s,sid,em) in enumerate(zip(scores, sids0, expMasses)):
         k = (sid, em)
         if k in sidExpmassScores:
             if s > sidExpmassScores[k]:
@@ -1276,6 +1359,7 @@ def mainIter(hyperparams):
                is the corresponding CV fold
 
     """
+
     if hyperparams['method']==2 and not svmlinReady:
         print("Selected method 2, SVM learning with L2-SVM-MFN,")
         print("but this solver could not be found.  Please build this solver")
@@ -1381,6 +1465,7 @@ def mainIter(hyperparams):
     trained_models = []
     drop_out_rate = hyperparams['dnn_dropout_rate']
     hyperparams['dnn_dropout_rate'] = hyperparams['starting_dropout_rate']
+    write_output_per_iter = not hyperparams['do_not_write_output_per_iter']
     if hyperparams['method'] == 3:
         q = hyperparams['deepq']
     else:
@@ -1400,26 +1485,14 @@ def mainIter(hyperparams):
         fpoo = fpo
         fpo = fp
 
-        # if write_output_per_iter and (i+1) % hyperparams['output_per_iter_granularity'] == 0:
-        if 1: # todo: add user input parameter to turn this off/on.  Consider only saving output identifications files
-              # only every N iterations, as output files per every iteration can eat up alot of disk space
-            # write output for iteration
+        if write_output_per_iter and (i+1) % hyperparams['output_per_iter_granularity'] == 0:
             isSvmlin = (hyperparams['method']==2)
             testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
             testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
             taq, _, qs = calcQ(testScores, Y, q, False)
 
-            ##############
-            ##############
-            ## F) Post-process results using TDC or (TODO) mix-max q-value estimatation procedures
-            ##############
-            ##############
-
             if hyperparams['tdc']:
-                testScores, tdcY, tdcpepstrings, tdcsids0, tdcexpMasses, _ = tdcPostProcessing(testScores, Y, pepstrings, sids0, expMasses)
-                taq, _, qs = calcQ(testScores, tdcY, q, False)
-                print("Could identify %d targets after target-decoy competition" % (len(taq)))
-                writeOutput(_join(output_dir, 'output_preTDC_iter' + str(i) + '.txt'), testScores, tdcY, tdcpepstrings, qs)
+                writeOutput(_join(output_dir,'output_allPsms_iter' + str(i) + '.txt'), testScores, Y, pepstrings, qs)
             else:
                 # writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
                 writeOutput(_join(output_dir,'output_iter' + str(i) + '.txt'), testScores, Y, pepstrings, qs)
@@ -1444,31 +1517,58 @@ def mainIter(hyperparams):
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
 
+    ##############
+    ##############
+    ## F) Post-process results using TDC or (TODO) mix-max q-value estimatation procedures
+    ##############
+    ##############
     if hyperparams['tdc']:
-        scores, Y, pepstrings, sids0, expMasses, oldToNewMapping = tdcPostProcessing(scores, Y, pepstrings, sids0, expMasses)
+        scores, Y, pepstrings, sids0, expMasses, oldToNewMapping = targetDecoyCompetition(scores, Y, pepstrings, sids0, expMasses)
         taq, _, qs = calcQ(scores, Y, q, False)
         print("Could identify %d targets after target-decoy competition" % (len(taq)))
-        X = X[oldToNewMapping]
+        print("shape")
+        print(X.shape)
+        X = X[oldToNewMapping, :]
+        print(X.shape)
+        # Save final identifications
+        writeOutput(_join(output_dir, 'output_pretdc.txt'), scores, Y, pepstrings, qs)
+        trainKeys, testKeys = mapTrainTestKeys(trainKeys, testKeys, oldToNewMapping)
     else:         
         # Save final identifications
         writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
 
-    return scores, X, Y, pepstrings, sids0, expMasses
+    return scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys
 
-def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
+def mapTrainTestKeys(trainKeys, testKeys, oldToNewMapping):
+    newTrainKeys = []
+    newTestKeys = []
+    newMap = {}
+    for i, j in enumerate(oldToNewMapping):
+        newMap[j] = i
+    for fold, (trainInds, testInds) in enumerate(zip(trainKeys, testKeys)):
+        newTrainInds = []
+        newTestInds = []
+        for ind in trainInds:
+            if ind in newMap:
+                newTrainInds.append(newMap[ind])
+        for ind in testInds:
+            if ind in newMap:
+                newTestInds.append(newMap[ind])
+        newTrainKeys.append(newTrainInds)
+        newTestKeys.append(newTestInds)
+
+    return newTrainKeys, newTestKeys
+
+def tdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys):
     """ Analysis workflow proceeds as follows:
          A) Normalize input features
          B) Create disjoint cross-validation (CV) training and testing sets as detailed in: 
             Granholm et al, "A cross-validation scheme for machine learning 
             algorithms in shotgun proteomics."
-         C) Search for initial score directions in each CV bin/fold
-         D) Further explore initial search space using a large number of 
-            deep snapshot ensembles (optional, true by default)
-         E) Perform semi-supervised learning for input --maxIters, using
+         C) Perform semi-supervised learning for input --maxIters, using
             --method as the underlying classifier which is trained on a CV training
             fold and tested on the corresponding disjoint test set.
-         F) Post-process results using TDC or (TODO) mix-max q-value estimatation procedures
-         G) Test learned parameters and save final post-processed identifications output_dir/output.txt
+         D) Test learned parameters and save final post-processed identifications output_dir/output.txt
     
          Notes:
             i) Identifications are currently written after every iteration, i, as
@@ -1502,11 +1602,13 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
     ## A) Normalize input features
     ##############
     ##############
+    print("X", X[:10,:])
     if _standardNorm:
         preprocessing.scale(X, copy = False)
     else:
         min_max_scaler = preprocessing.MinMaxScaler()
         min_max_scaler.fit_transform(X, copy = False)
+    print("X", X[:10,:])
 
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
@@ -1522,7 +1624,8 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
     ##############
     ##############
 
-    trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
+    # trainKeys, testKeys = partitionCvBins(sidSortedRowIndices, sids)
+    sids = sids0
     scores, initTaq = splitScoresByCvBins(trainKeys, scores, Y, q)
 
     ##############
@@ -1537,15 +1640,16 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
     fpoo = 0 # number of identifications from previous, previous iteration
     trained_models = []
     drop_out_rate = hyperparams['dnn_dropout_rate']
-    hyperparams['dnn_dropout_rate'] = hyperparams['starting_dropout_rate']
+    hyperparams['dnn_dropout_rate'] = 0. # hyperparams['starting_tdc_dropout_rate']
+    write_output_per_iter = not hyperparams['do_not_write_output_per_iter']
     if hyperparams['method'] == 3:
         q = hyperparams['deepq']
     else:
         q = hyperparams['q']
 
     for i in range(hyperparams['maxIters']):
-        if i>0:
-            hyperparams['dnn_dropout_rate'] = drop_out_rate
+        # if i>0:
+        #     hyperparams['dnn_dropout_rate'] = drop_out_rate
 
         scores, fp, trained_models, validation_AUC = doIter(
             q, trainKeys, scores, X, Y, targetDecoyRatio, hyperparams['method'], i, 
@@ -1557,10 +1661,7 @@ def postTdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses):
         fpoo = fpo
         fpo = fp
 
-        # if write_output_per_iter and (i+1) % hyperparams['output_per_iter_granularity'] == 0:
-        if 1: # todo: add user input parameter to turn this off/on.  Consider only saving output identifications files
-              # only every N iterations, as output files per every iteration can eat up alot of disk space
-            # write output for iteration
+        if write_output_per_iter and (i+1) % hyperparams['output_per_iter_granularity'] == 0:
             isSvmlin = (hyperparams['method']==2)
             testScores, numIdentified = doTest(q, testKeys, X, Y, trained_models, isSvmlin)
             testScores = doMergeScores(q, testKeys, testScores, Y, isSvm)
@@ -1602,7 +1703,7 @@ if __name__ == '__main__':
     parser.add_option('--tdc', action= 'store_true', help = 'Use target-decoy competition to assign q-values.')
     parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
     parser.add_option('--do_not_write_output_per_iter', action= 'store_true', help = 'Do not write recalibrated psms after every X iterations, where X = --output_per_iter_granularity.')
-    parser.add_option('--output_per_iter_granularity', type = 'int', action= 'store', default = 5, help = 'Number of iterations to write recalibrated psms.')
+    parser.add_option('--output_per_iter_granularity', type = 'int', action= 'store', default = 1, help = 'Number of iterations to write recalibrated psms.')
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--numThreads', type = 'int', action= 'store', default=1)
@@ -1623,6 +1724,7 @@ if __name__ == '__main__':
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
     parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate; must be 0 <= rate < 1.')
     parser.add_option('--starting_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate for first iteration, must be 0 <= rate < 1.  Values > 0 promote initial exploration of the parameter space')
+    parser.add_option('--starting_tdc_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate for first iteration, must be 0 <= rate < 1.  Values > 0 promote initial exploration of the parameter space')
     parser.add_option('--dnn_gpu_id', type = 'int', action= 'store', default = 0, 
                       help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
@@ -1638,8 +1740,9 @@ if __name__ == '__main__':
 
     global _verb, _seed
     _verb = params['verbose']
-    _seed=params['seed']
+    _seed= params['seed']
 
-    scores, X, Y, pepstrings, sids0, expMasses = mainIter(params)
+
+    scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys = mainIter(params)
     if params["tdc"]:
-        postTdc(params, scores, X, Y, pepstrings, sids0, expMasses)
+        tdc(params, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys)

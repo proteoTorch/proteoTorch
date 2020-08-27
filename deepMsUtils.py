@@ -28,7 +28,8 @@ except ImportError:
 import itertools
 import numpy
 
-from deepMs import (calcQAndNumIdentified, givenPsmIds_writePin, load_pin_return_featureMatrix, 
+from deepMs import (calcQAndNumIdentified, givenPsmIds_writePin, 
+                    load_pin_return_featureMatrix, load_pin_return_scanExpmassPairs,
                     calculateTargetDecoyRatio, searchForInitialDirection_split,
                     calcQ, getDecoyIdx, sortRowIndicesBySid)
 from scipy.spatial import distance
@@ -1054,7 +1055,8 @@ def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = Fa
     mapScanMassToId = {}
     if doTdc:
         # Note: (scannr, expmass) pairs are used to determine PSMs for target-decoy competition
-        pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(dataset, normalize = False)
+        # pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(dataset, normalize = False)
+        pepstrings, _, sids, expMasses = load_pin_return_scanExpmassPairs(dataset)
         # determine mapping from PSMId/SpecId to (scannr, expmass)
         for p, s, em in zip(pepstrings,sids,expMasses):
             psmId = p[0]
