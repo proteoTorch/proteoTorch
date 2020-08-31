@@ -280,7 +280,7 @@ def load_percolator_target_decoy_files_tdc(filenames,  mapIdToScanMass, mapScanM
     print("Read %d scores" % (len(scores)))
     return scores, labels
 
-def load_percolator_target_decoy_files_bucket_tdc(filenames,  mapIdToScanMass, mapScanMassToId,
+def load_percolator_target_decoy_files_bucket_tdc(filenames,  mapIdToScanMass, 
                                                   scoreKey = "score", maxPerSid = False,
                                                   writeOutput = False, outputDirectory = None, 
                                                   percolatorTdcFile = 'percolatorTdc.txt'):
@@ -299,21 +299,26 @@ def load_percolator_target_decoy_files_bucket_tdc(filenames,  mapIdToScanMass, m
     allScores = {}
     targetCheck = set([]) # check whether both a target and decoy were supplied
     decoyCheck = set([])
+    mapScanMassToId = {}
     for t,tid in zip(targets,tids):
         scanMassPair = mapIdToScanMass[tid]
         if scanMassPair in allScores:
             if t > allScores[scanMassPair][0]:
                 allScores[scanMassPair] = (t,1)
+                mapScanMassToId[scanMassPair] = tid
         else:
             allScores[scanMassPair] = (t,1)
+            mapScanMassToId[scanMassPair] = tid
 
     for d,did in zip(decoys,dids):
         scanMassPair = mapIdToScanMass[did]
         if scanMassPair in allScores:
             if d > allScores[scanMassPair][0]:
                 allScores[scanMassPair] = (d,-1)
+                mapScanMassToId[scanMassPair] = did
         else:
             allScores[scanMassPair] = (d,-1)
+            mapScanMassToId[scanMassPair] = did
 
     scores = []
     labels = []
@@ -432,79 +437,7 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
     print("Read %d scores" % (lineNum-1))
     return scores, labels, ids
 
-def load_pin_scores_tdc(filename, mapIdToScanMass, mapScanMassToId,
-                        scoreKey = "score", labelKey = "Label", idKey = "PSMId",
-                        writeOutput = False, outputDirectory = None):
-    """ Take max PSM for each (scan, expmass) pair.  Check whether PIN file contains a mix of TDC and mix-max
-        results, only perform competition for (scan, expmass) pairs with at least one target and one decoy PSM
-        supplied.
-    """
-    allScores = {}
-    targetCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
-    decoyCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
-
-    lineNum = 0
-    with open(filename, 'r') as f:
-        for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
-            lineNum += 1
-            # todo: add try excepts to the below
-            s = float(l[scoreKey])
-            label = int(l[labelKey])
-            # make sure idKey is valid
-            if idKey in l:
-                psmid = l[idKey]
-            else:
-                if 'SpecId' in l:
-                    idKey = 'SpecId'
-                    psmid = l[idKey]
-                else:
-                    raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
-                    exit(-1)
-
-            scanMassPair = mapIdToScanMass[psmid]
-            if label == 1:
-                targetCheck.add(scanMassPair)
-                if scanMassPair in allScores:
-                    allScores[scanMassPair].append((s,1))
-                else:
-                    allScores[scanMassPair] = [(s,1)]
-            elif label == -1:
-                decoyCheck.add(scanMassPair)
-                if scanMassPair in allScores:
-                    allScores[scanMassPair].append((s,-1))
-                else:
-                    allScores[scanMassPair] = [(s,-1)]
-            else:
-                raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
-    print("Read %d scores" % (lineNum-1))
-    # Perform the competition
-    scores = []
-    labels = []
-    ids = []
-    if writeOutput: # Write new output file, avoid rerunning tdc post-processing
-        if not outputDirectory: # no output directory specified, just skip writing
-            print("Write tdc output selected but no output directory specified, moving on without writing.")
-            writeOutput = False
-        else:
-            if not os.path.exists(outputDirectory):
-                os.makedirs(outputDirectory)
-            # Use same filename, place in new directory
-            fid = open(os.path.join(outputDirectory, os.path.basename(filename)), 'w')
-            fid.write("%s\t%s\t%s\n" % (idKey, scoreKey, labelKey))
-    for scanMassPair in allScores:
-        if scanMassPair in targetCheck and scanMassPair in decoyCheck:
-            s,l = max(allScores[scanMassPair], key = lambda r: r[0])
-            psmid = mapScanMassToId[scanMassPair]
-            scores.append(s)
-            labels.append(l)
-            ids.append(psmid)
-            if writeOutput:
-                fid.write("%s\t%f\t%d\n" % (psmid, s, l))
-    if writeOutput:
-        fid.close()
-    return scores, labels, ids
-
-def load_pin_scores_bucket_tdc(filename, mapIdToScanMass, mapScanMassToId,
+def load_pin_scores_bucket_tdc(filename, mapIdToScanMass, 
                                scoreKey = "score", labelKey = "Label", idKey = "PSMId",
                                writeOutput = False, outputDirectory = None):
     """ Take max PSM for each (scan, expmass) pair.  This skips checking whether PIN file contains a mix of TDC and mix-max
@@ -513,6 +446,7 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass, mapScanMassToId,
     allScores = {}
     targetCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
     decoyCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
+    mapScanMassToId = {}
 
     lineNum = 0
     # Perform the competition
@@ -537,8 +471,10 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass, mapScanMassToId,
             if scanMassPair in allScores:
                 if s > allScores[scanMassPair][0]:
                     allScores[scanMassPair] = (s,label)
+                    mapScanMassToId[scanMassPair] = psmid
             else:
                 allScores[scanMassPair] = (s,label)
+                mapScanMassToId[scanMassPair] = psmid
     print("Read %d scores" % (lineNum-1))
     # Perform the competition
     scores = []
@@ -566,116 +502,189 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass, mapScanMassToId,
         fid.close()
     return scores, labels, ids
 
-def load_pin_scores_tdc_crux(filename, scoreKey = "score", labelKey = "Label", idKey = "PSMId",
-                             targetString = 'target', decoyString = 'decoy'):
-    allScores = {}
-    targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
-    decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+# def load_pin_scores_tdc(filename, mapIdToScanMass,
+#                         scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+#                         writeOutput = False, outputDirectory = None):
+#     """ Take max PSM for each (scan, expmass) pair.  Check whether PIN file contains a mix of TDC and mix-max
+#         results, only perform competition for (scan, expmass) pairs with at least one target and one decoy PSM
+#         supplied.
+#     """
+#     allScores = {}
+#     targetCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
+#     decoyCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
 
-    lineNum = 0
-    with open(filename, 'r') as f:
-        for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
-            lineNum += 1
-            # todo: add try excepts to the below
-            s = float(l[scoreKey])
-            label = int(l[labelKey])
-            # make sure idKey is valid
-            if idKey in l:
-                psmid = l[idKey]
-            else:
-                if 'SpecId' in l:
-                    idKey = 'SpecId'
-                    psmid = l[idKey]
-                else:
-                    raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
-                    exit(-1)
+#     lineNum = 0
+#     mapScanMassToId = {}
+#     with open(filename, 'r') as f:
+#         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
+#             lineNum += 1
+#             # todo: add try excepts to the below
+#             s = float(l[scoreKey])
+#             label = int(l[labelKey])
+#             # make sure idKey is valid
+#             if idKey in l:
+#                 psmid = l[idKey]
+#             else:
+#                 if 'SpecId' in l:
+#                     idKey = 'SpecId'
+#                     psmid = l[idKey]
+#                 else:
+#                     raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
+#                     exit(-1)
 
-            if label == 1:
-                psmid = psmid.split(targetString)[1]
-                if psmid in allScores:
-                    allScores[psmid].append((s,1))
-                else:
-                    allScores[psmid] = [(s,1)]
-                    targetCheck.add(psmid)
-            elif label == -1:
-                psmid = psmid.split(decoyString)[1]
-                if psmid in allScores:
-                    allScores[psmid].append((s,-1))
-                    decoyCheck.add(psmid)
-                else:
-                    allScores[psmid] = [(s,-1)]
-                    decoyCheck.add(psmid)
-            else:
-                raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
-    print("Read %d scores" % (lineNum-1))
-    # Perform the competition
-    scores = []
-    labels = []
-    ids = []
-    for psmid in allScores:
-        if psmid in targetCheck and psmid in decoyCheck:
-            s,l = max(allScores[psmid], key = lambda r: r[0])
-            scores.append(s)
-            labels.append(l)
-            ids.append(psmid)
-    return scores, labels, ids
+#             scanMassPair = mapIdToScanMass[psmid]
+#             if label == 1:
+#                 targetCheck.add(scanMassPair)
+#                 if scanMassPair in allScores:
+#                     allScores[scanMassPair].append((s,1))
+#                 else:
+#                     allScores[scanMassPair] = [(s,1)]
+#             elif label == -1:
+#                 decoyCheck.add(scanMassPair)
+#                 if scanMassPair in allScores:
+#                     allScores[scanMassPair].append((s,-1))
+#                 else:
+#                     allScores[scanMassPair] = [(s,-1)]
+#             else:
+#                 raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
+#     print("Read %d scores" % (lineNum-1))
+#     # Perform the competition
+#     scores = []
+#     labels = []
+#     ids = []
+#     if writeOutput: # Write new output file, avoid rerunning tdc post-processing
+#         if not outputDirectory: # no output directory specified, just skip writing
+#             print("Write tdc output selected but no output directory specified, moving on without writing.")
+#             writeOutput = False
+#         else:
+#             if not os.path.exists(outputDirectory):
+#                 os.makedirs(outputDirectory)
+#             # Use same filename, place in new directory
+#             fid = open(os.path.join(outputDirectory, os.path.basename(filename)), 'w')
+#             fid.write("%s\t%s\t%s\n" % (idKey, scoreKey, labelKey))
+#     for scanMassPair in allScores:
+#         if scanMassPair in targetCheck and scanMassPair in decoyCheck:
+#             s,l = max(allScores[scanMassPair], key = lambda r: r[0])
+#             psmid = mapScanMassToId[scanMassPair]
+#             scores.append(s)
+#             labels.append(l)
+#             ids.append(psmid)
+#             if writeOutput:
+#                 fid.write("%s\t%f\t%d\n" % (psmid, s, l))
+#     if writeOutput:
+#         fid.close()
+#     return scores, labels, ids
 
-def postprocess_results_tdcOrMixmax(pinfile, ptDirectory, outputDirectory,
-                                    scoreKey = "score", labelKey = "Label", idKey = "PSMId"):
-    """ Post-process proteoTorch results to either compute target-decoy competition or (todo) mix-max method
-        for q-value esimtation
+# def load_pin_scores_tdc_crux(filename, scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+#                              targetString = 'target', decoyString = 'decoy'):
+#     allScores = {}
+#     targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+#     decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
 
-        todo: add mixmax procedure
-    """
+#     lineNum = 0
+#     with open(filename, 'r') as f:
+#         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
+#             lineNum += 1
+#             # todo: add try excepts to the below
+#             s = float(l[scoreKey])
+#             label = int(l[labelKey])
+#             # make sure idKey is valid
+#             if idKey in l:
+#                 psmid = l[idKey]
+#             else:
+#                 if 'SpecId' in l:
+#                     idKey = 'SpecId'
+#                     psmid = l[idKey]
+#                 else:
+#                     raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
+#                     exit(-1)
 
-    pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(pinfile, normalize = False)
-    # determine mapping from PSMId/SpecId to (scannr, expmass)
-    mapIdToScanMass = {}
-    mapScanMassToId = {}
-    for p, s, em in zip(pepstrings,sids,expMasses):
-        psmId = p[0]
-        mapIdToScanMass[psmId] = (s,em)
-        mapScanMassToId[(s,em)] = psmId
-    print("%d unique Sids, %d unique exp masses" % (len(set(sids)), len(set(expMasses))))
-    if not os.path.exists(outputDirectory):
-        os.makedirs(outputDirectory)
-    for f in os.listdir(ptDirectory):
-        if 'output' in f:
-            scores, labels, ids = load_pin_scores(os.path.join(ptDirectory, f), scoreKey, labelKey, idKey)
-            allScores = {}
-            lineNum = 0
-            targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
-            decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
-            for s,l,i in zip(scores,labels,ids):
-                lineNum += 1
-                scanMassPair = mapIdToScanMass[i]
-                if l==1:
-                    targetCheck.add(scanMassPair)
-                    if scanMassPair in allScores:
-                        allScores[scanMassPair].append((s,1))
-                    else:
-                        allScores[scanMassPair] = [(s,1)]
-                elif l==-1:
-                    decoyCheck.add(scanMassPair)
-                    if scanMassPair in allScores:
-                        allScores[scanMassPair].append((s,-1))
-                    else:
-                        allScores[scanMassPair] = [(s,-1)]
-                else:
-                    raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
-            print("Input file %s: read %d scores" % (os.path.join(ptDirectory, f),lineNum-1))
-            # Perform the competition
-            with open(os.path.join(outputDirectory, f), 'w') as fid:
-                lineNum = 0
-                # Write header: (1) id (2) score (3) label
-                fid.write("%s\t%s\t%s\t%s\t%s\n" % (idKey, scoreKey, labelKey, "ScanNr", "ExpMass"))
-                for scanMassPair in allScores:
-                    if scanMassPair in targetCheck and scanMassPair in decoyCheck:
-                        lineNum += 1
-                        s,l = max(allScores[scanMassPair], key = lambda r: r[0])
-                        psmid = mapScanMassToId[scanMassPair] 
-                        fid.write("%s\t%f\t%d\t%d\t%s\n" % (psmid, s, l,scanMassPair[0], scanMassPair[1]))
-                print("Output file %s: wrote %d scores" % (os.path.join(outputDirectory, f), lineNum))
+#             if label == 1:
+#                 psmid = psmid.split(targetString)[1]
+#                 if psmid in allScores:
+#                     allScores[psmid].append((s,1))
+#                 else:
+#                     allScores[psmid] = [(s,1)]
+#                     targetCheck.add(psmid)
+#             elif label == -1:
+#                 psmid = psmid.split(decoyString)[1]
+#                 if psmid in allScores:
+#                     allScores[psmid].append((s,-1))
+#                     decoyCheck.add(psmid)
+#                 else:
+#                     allScores[psmid] = [(s,-1)]
+#                     decoyCheck.add(psmid)
+#             else:
+#                 raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
+#     print("Read %d scores" % (lineNum-1))
+#     # Perform the competition
+#     scores = []
+#     labels = []
+#     ids = []
+#     for psmid in allScores:
+#         if psmid in targetCheck and psmid in decoyCheck:
+#             s,l = max(allScores[psmid], key = lambda r: r[0])
+#             scores.append(s)
+#             labels.append(l)
+#             ids.append(psmid)
+#     return scores, labels, ids
+
+# def postprocess_results_tdcOrMixmax(pinfile, ptDirectory, outputDirectory,
+#                                     scoreKey = "score", labelKey = "Label", idKey = "PSMId"):
+#     """ Post-process proteoTorch results to either compute target-decoy competition or (todo) mix-max method
+#         for q-value esimtation
+
+#         todo: add mixmax procedure
+#     """
+
+#     pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(pinfile, normalize = False)
+#     # determine mapping from PSMId/SpecId to (scannr, expmass)
+#     mapIdToScanMass = {}
+#     mapScanMassToId = {}
+#     for p, s, em in zip(pepstrings,sids,expMasses):
+#         psmId = p[0]
+#         mapIdToScanMass[psmId] = (s,em)
+#         mapScanMassToId[(s,em)] = psmId
+#     print("%d unique Sids, %d unique exp masses" % (len(set(sids)), len(set(expMasses))))
+#     if not os.path.exists(outputDirectory):
+#         os.makedirs(outputDirectory)
+#     for f in os.listdir(ptDirectory):
+#         if 'output' in f:
+#             scores, labels, ids = load_pin_scores(os.path.join(ptDirectory, f), scoreKey, labelKey, idKey)
+#             allScores = {}
+#             lineNum = 0
+#             targetCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+#             decoyCheck = set([]) # simple has to make sure we have both a target and decoy PSM per spectrum
+#             for s,l,i in zip(scores,labels,ids):
+#                 lineNum += 1
+#                 scanMassPair = mapIdToScanMass[i]
+#                 if l==1:
+#                     targetCheck.add(scanMassPair)
+#                     if scanMassPair in allScores:
+#                         allScores[scanMassPair].append((s,1))
+#                     else:
+#                         allScores[scanMassPair] = [(s,1)]
+#                 elif l==-1:
+#                     decoyCheck.add(scanMassPair)
+#                     if scanMassPair in allScores:
+#                         allScores[scanMassPair].append((s,-1))
+#                     else:
+#                         allScores[scanMassPair] = [(s,-1)]
+#                 else:
+#                     raise ValueError('Labels must be either 1 or -1, encountered value %d in line %d\n' % (label, lineNum))
+#             print("Input file %s: read %d scores" % (os.path.join(ptDirectory, f),lineNum-1))
+#             # Perform the competition
+#             with open(os.path.join(outputDirectory, f), 'w') as fid:
+#                 lineNum = 0
+#                 # Write header: (1) id (2) score (3) label
+#                 fid.write("%s\t%s\t%s\t%s\t%s\n" % (idKey, scoreKey, labelKey, "ScanNr", "ExpMass"))
+#                 for scanMassPair in allScores:
+#                     if scanMassPair in targetCheck and scanMassPair in decoyCheck:
+#                         lineNum += 1
+#                         s,l = max(allScores[scanMassPair], key = lambda r: r[0])
+#                         psmid = mapScanMassToId[scanMassPair] 
+#                         fid.write("%s\t%f\t%d\t%d\t%s\n" % (psmid, s, l,scanMassPair[0], scanMassPair[1]))
+#                 print("Output file %s: wrote %d scores" % (os.path.join(outputDirectory, f), lineNum))
 
 def psmId_diffs(inputPin, percFiles, pinFile, percScoreKey = 'score', pinScoreKey = 'score',
                 labelKey = "Label", idKey = "PSMId"):
@@ -705,19 +714,19 @@ def psmId_diffs(inputPin, percFiles, pinFile, percScoreKey = 'score', pinScoreKe
     
 
 def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001, 
-                     tdc = False, psmIdToScanMass = {}, scanMassTopsmId = {},
+                     tdc = False, psmIdToScanMass = {},
                      writeTdc = False, tdcDir = ''):
     """ Load all PSMs and features file
     """
     if len(filenames)==1:
         if tdc:
-            scores, labels, _ = load_pin_scores_bucket_tdc(filenames[0], psmIdToScanMass, scanMassTopsmId, scoreKey,
+            scores, labels, _ = load_pin_scores_bucket_tdc(filenames[0], psmIdToScanMass, scoreKey,
                                                            writeOutput = writeTdc, outputDirectory = tdcDir)
         else:
             scores, labels, _ = load_pin_scores(filenames[0], scoreKey)
     elif len(filenames)==2: # Assume these are Percolator results, where target is specified followed by decoy
         if tdc:
-            scores, labels = load_percolator_target_decoy_files_bucket_tdc(filenames, psmIdToScanMass, scanMassTopsmId, scoreKey,
+            scores, labels = load_percolator_target_decoy_files_bucket_tdc(filenames, psmIdToScanMass, scoreKey,
                                                                            writeOutput = writeTdc, outputDirectory = tdcDir)
         else:
             scores, labels, _ = load_percolator_target_decoy_files(filenames, scoreKey)
@@ -1052,7 +1061,6 @@ def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = Fa
         raise Exception('TDC post-processing selected, but analyzed PIN not supplied.  Exitting')
 
     mapIdToScanMass = {}
-    mapScanMassToId = {}
     if doTdc:
         # Note: (scannr, expmass) pairs are used to determine PSMs for target-decoy competition
         # pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(dataset, normalize = False)
@@ -1061,13 +1069,12 @@ def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = Fa
         for p, s, em in zip(pepstrings,sids,expMasses):
             psmId = p[0]
             mapIdToScanMass[psmId] = (s,em)
-            mapScanMassToId[(s,em)] = psmId
         
     def process(arg):
         desc, scoreKey, fn = parse_arg(arg)
         methods.append(desc)
         qs, ps, naq = load_test_scores(fn, scoreKey, tdc = doTdc, 
-                                       psmIdToScanMass = mapIdToScanMass, scanMassTopsmId = mapScanMassToId,
+                                       psmIdToScanMass = mapIdToScanMass,
                                        writeTdc = writeTdcResults, tdcDir = tdcOutputDir)
         scorelists.append( (qs, ps) )
         print ('%s: %d identifications, %d identified at q <= 0.01' % (desc, len(qs), naq))

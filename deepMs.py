@@ -260,7 +260,7 @@ def load_pin_return_featureMatrix(filename, normalize = True):
         ...
         header field m : Protein id m - n - 4
     """
-    f = checkGzip_openfile(filename)
+    f = checkGzip_openfile(filename, 'rt')
     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
     headerInOrder = r.fieldnames
     l = headerInOrder
@@ -412,7 +412,7 @@ def load_pin_return_scanExpmassPairs(filename):
         ...
         header field m : Protein id m - n - 4
     """
-    f = checkGzip_openfile(filename)
+    f = checkGzip_openfile(filename, 'rt')
     r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
     headerInOrder = r.fieldnames
     l = headerInOrder
@@ -577,7 +577,7 @@ def calculateTdcOrMixMax(pepstrings, labels, sids, expMasses):
         mix-max - at least one decoy and one target PSM supplied per (scan id, expmass) pair
         TDC - only one PSM (assumed to be the top scoring target or decoy) per (scan id, expmass) pair
     """
-    # Check if a concatendated search was performed
+    # Check whether a concatenated search was run/how many PSMs are TDC compliant
     tdHash = {}
     pairCheck = {}
     psmIdHash = {}
@@ -853,11 +853,6 @@ def doRand():
     global _seed
     _seed=(_seed * 279470273) % 4294967291
     return _seed
-
-# def doRand(seed):
-#     seed=(seed * 279470273) % 4294967291
-#     return seed
-
 
 def partitionCvBins(featureMatRowIndices, sids, folds = 3, seed = 1):
     """ Create disjoint cross-validation train and test sets
@@ -1523,16 +1518,24 @@ def mainIter(hyperparams):
     ##############
     ##############
     if hyperparams['tdc']:
-        scores, Y, pepstrings, sids0, expMasses, oldToNewMapping = targetDecoyCompetition(scores, Y, pepstrings, sids0, expMasses)
+        numAllPsms = float(len(scores))
+        
+        scores, Y, pepstrings, sids0, expMasses, tdcWinners = targetDecoyCompetition(scores, Y, pepstrings, sids0, expMasses)
         taq, _, qs = calcQ(scores, Y, q, False)
         print("Could identify %d targets after target-decoy competition" % (len(taq)))
-        print("shape")
-        print(X.shape)
-        X = X[oldToNewMapping, :]
-        print(X.shape)
-        # Save final identifications
+        X = X[tdcWinners, :]
+        # Update train and test partitions for further processing
+        trainKeys, testKeys = mapTrainTestKeys(trainKeys, testKeys, tdcWinners)
         writeOutput(_join(output_dir, 'output_pretdc.txt'), scores, Y, pepstrings, qs)
-        trainKeys, testKeys = mapTrainTestKeys(trainKeys, testKeys, oldToNewMapping)
+
+        # numSubPsms = float(len(scores))
+        # psmRat = numSubPsms / numAllPsms
+        # if psmRat > 0.99:
+        #     hyperparams['tdc'] = False
+        #     # Save final identifications
+        #     writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
+        # else:
+        #     writeOutput(_join(output_dir, 'output_pretdc.txt'), scores, Y, pepstrings, qs)
     else:         
         # Save final identifications
         writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
@@ -1540,6 +1543,10 @@ def mainIter(hyperparams):
     return scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys
 
 def mapTrainTestKeys(trainKeys, testKeys, oldToNewMapping):
+    """ Update train and test keys under new mapping, such that
+        for oldToNewMapping[i] = j, and tk in trainKeys, 
+        tk[j] = i
+    """
     newTrainKeys = []
     newTestKeys = []
     newMap = {}
@@ -1602,13 +1609,11 @@ def tdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, test
     ## A) Normalize input features
     ##############
     ##############
-    print("X", X[:10,:])
     if _standardNorm:
         preprocessing.scale(X, copy = False)
     else:
         min_max_scaler = preprocessing.MinMaxScaler()
         min_max_scaler.fit_transform(X, copy = False)
-    print("X", X[:10,:])
 
     sids, sidSortedRowIndices = sortRowIndicesBySid(sids0)
     l = X.shape
@@ -1691,8 +1696,6 @@ def tdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, test
     writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
     return 0
 
-    
-
 
 if __name__ == '__main__':
 
@@ -1703,7 +1706,7 @@ if __name__ == '__main__':
     parser.add_option('--tdc', action= 'store_true', help = 'Use target-decoy competition to assign q-values.')
     parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
     parser.add_option('--do_not_write_output_per_iter', action= 'store_true', help = 'Do not write recalibrated psms after every X iterations, where X = --output_per_iter_granularity.')
-    parser.add_option('--output_per_iter_granularity', type = 'int', action= 'store', default = 1, help = 'Number of iterations to write recalibrated psms.')
+    parser.add_option('--output_per_iter_granularity', type = 'int', action= 'store', default = 5, help = 'Number of iterations to write recalibrated psms.')
     parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--numThreads', type = 'int', action= 'store', default=1)
@@ -1741,7 +1744,6 @@ if __name__ == '__main__':
     global _verb, _seed
     _verb = params['verbose']
     _seed= params['seed']
-
 
     scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys = mainIter(params)
     if params["tdc"]:
