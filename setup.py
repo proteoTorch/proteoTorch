@@ -8,6 +8,7 @@ if (sys.version_info[0] == 3 and sys.version_info[1] < 0):
 from setuptools import setup, find_packages
 from Cython.Build import cythonize
 from os import path
+import subprocess
 
 DISTNAME = 'ProteoTorch'
 VERSION = '0.1.0'
