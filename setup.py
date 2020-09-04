@@ -17,7 +17,7 @@ DESCRIPTION = 'Deep semi-supervised learning for identification of shotgun prote
 #     LONG_DESCRIPTION = f_in.read()
 AUTHOR = 'John T. Halloran, Gregor Urban'
 AUTHOR_EMAIL = 'johnhalloran321@gmail.com, gur9000@outlook.com'
-URL = 'https://github.com/johnhalloran321/proteotorch'
+URL = 'https://github.com/johnhalloran321/proteoTorch'
 LICENSE='OSL-3.0'
 
 CLASSIFIERS = ["Natural Language :: English",

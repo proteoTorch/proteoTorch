@@ -28,10 +28,10 @@ except ImportError:
 import itertools
 import numpy
 
-from analyze import (calcQAndNumIdentified, givenPsmIds_writePin, 
-                     load_pin_return_featureMatrix, load_pin_return_scanExpmassPairs,
-                     calculateTargetDecoyRatio, searchForInitialDirection_split,
-                     calcQ, getDecoyIdx, sortRowIndicesBySid)
+from proteoTorch.analyze import (calcQAndNumIdentified, givenPsmIds_writePin, 
+                                 load_pin_return_featureMatrix, load_pin_return_scanExpmassPairs,
+                                 calculateTargetDecoyRatio, searchForInitialDirection_split,
+                                 calcQ, getDecoyIdx, sortRowIndicesBySid)
 from scipy.spatial import distance
 
 def calcDistanceMat(testMat,trainMat, metric = 'euclidean'):
