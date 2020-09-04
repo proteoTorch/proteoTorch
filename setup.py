@@ -12,7 +12,7 @@ import subprocess
 
 DISTNAME = 'ProteoTorch'
 VERSION = '0.1.0'
-DESCRIPTION = 'Deep semi-supervised learning for shotgun proteomics identification'
+DESCRIPTION = 'Deep semi-supervised learning for identification of shotgun proteomics data'
 # with open('README.md') as f_in:
 #     LONG_DESCRIPTION = f_in.read()
 AUTHOR = 'John T. Halloran, Gregor Urban'
@@ -35,11 +35,11 @@ def build_solvers():
     """ Check if the solver library has been built.  If not, run
         make in the solvers directory
     """
-    if not path.exists(path.join('solvers', 'libssl.so')):
+    if not path.exists(path.join('proteoTorch_solvers', 'libssl.so')):
         try:
-            subprocess.check_call(['make'], cwd='solvers')
+            subprocess.check_call(['make'], cwd='proteoTorch_solvers')
         except:
-            print("Could not build SVM solver library")
+            print("Could not build ProteoTorch SVM solver library")
 
 def main():
     build_solvers()
@@ -50,13 +50,11 @@ def main():
         author_email=AUTHOR_EMAIL,
         description=DESCRIPTION,
         license=LICENSE,
-        packages=find_packages(include=['proteoTorch', 'pyfiles']),
-        # long_description=LONG_DESCRIPTION,
-        # long_description_content_type='text/markdown',
+        packages=find_packages(include=["proteoTorch", "proteoTorch.*, proteoTorch_solvers"]),
         url=URL,
         platforms=['any'],
         classifiers=CLASSIFIERS,
-        ext_modules = cythonize("cylibs/qvalues.pyx",
+        ext_modules = cythonize("proteoTorch/cylibs/proteoTorch_qvalues.pyx",
                                 build_dir="build")
     )
 

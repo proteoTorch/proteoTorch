@@ -27,20 +27,20 @@ from os.path import splitext
 _mp_data = {}
 
 try:
-    from solvers import l2_svm_mfn
+    from proteoTorch_solvers import l2_svm_mfn
     svmlinReady = True
 except:
     print("Loaded all solvers except L2-SVM-MFN")
     svmlinReady = False
 
 try:
-    from qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
+    from proteoTorch_qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
 except:
-    print("Cython q-value not found, loading strictly python q-value library")
-    from pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
+    print("Warning: Cython q-value not found, loading strictly python q-value library, which slows down analysis significantly.")
+    from proteoTorch.pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
 
-import dnn_code
-import mini_utils
+import proteoTorch.dnn_code as dnn_code
+import proteoTorch.mini_utils as mini_utils
 
 
 AUC_fn_001 = mini_utils.AUC_up_to_tol_singleQ(0.01)

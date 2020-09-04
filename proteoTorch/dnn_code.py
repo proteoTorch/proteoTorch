@@ -14,12 +14,15 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import numpy as np
-import torch_utils
+import proteoTorch.torch_utils as torch_utils
 
-import mini_utils
-import deepMs
+import proteoTorch.mini_utils as mini_utils
 
-from deepMs import calcQAndNumIdentified
+try:
+    from proteoTorch_qvalues import calcQ, calcQAndNumIdentified
+except:
+    print("Cython q-value not found, loading strictly python q-value library")
+    from proteoTorch.pyfiles.qvalsBase import calcQ, calcQAndNumIdentified
 
 _DEFAULT_HYPERPARAMS = {'dnn_optimizer': 'adam', 'batchsize': 5000, 'dnn_num_epochs': 2000, 
                         'dnn_lr': 0.001, 'l2_reg_const':0,
@@ -249,7 +252,7 @@ def DNNSingleFold(thresh, kFold, train_features, train_labels, validation_Featur
     # grab predictions for class 1
     test_pred = torch_utils.run_model_on_data(valid_data[0], model, DEVICE, 5000)[:, 1]
         
-    tp, _, _ = deepMs.calcQ(test_pred, validation_Labels, thresh, skipDecoysPlusOne=True)
+    tp, _, _ = calcQ(test_pred, validation_Labels, thresh, skipDecoysPlusOne=True)
     print("DNN CV finished for fold %d: %d targets identified" % (kFold, len(tp)))
     return test_pred, len(tp), ModelWrapper_like_sklearn(model, DEVICE)
 
