@@ -4,7 +4,7 @@ import g
 np = g.np
 import ExperimentManager as EM
 import ast
-import deepMs
+import proteoTorch as proTorch
 
 '''
 example:
@@ -37,7 +37,7 @@ if __name__=='__main__':
         if not g.isfile(results_file):
             EM.create_experiment(this_HP, results_file=results_file)
 
-        EM.main_loop(deepMs.mainIter, None, default_hparams, results_file_naming_convention='results', results_file_search_dir='results/')
+        EM.main_loop(proteoTorch.mainIter, None, default_hparams, results_file_naming_convention='results', results_file_search_dir='results/')
     else:
         assert len(sys.argv) >= 3, 'Format is:   python <thisfile.py> results_file ARS_config_file [PARAM_NAME1=VALUE1] [PARAM_NAME2=VALUE2] [...]'
         
@@ -53,6 +53,6 @@ if __name__=='__main__':
                 except:
                     this_HP[k] = v
         
-        EM.main_loop_ARS(deepMs.mainIter, ARS_config_file=ARS_CONFIG_FILE, 
+        EM.main_loop_ARS(proteoTorch.mainIter, ARS_config_file=ARS_CONFIG_FILE, 
                          output_results_file=RES_FILE_NAME, valid_hyperparameters=None, 
                          default_hparams=this_HP, higher_is_better=True, num_iterations=250)
