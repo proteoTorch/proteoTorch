@@ -53,6 +53,11 @@ def main():
         packages=find_packages(include=["proteoTorch", "proteoTorch.*, proteoTorch_solvers"]),
         url=URL,
         platforms=['any'],
+        # install_requires=[
+        #     'numpy', 
+        #     'sklearn', 
+        #     'torch'
+        # ],
         classifiers=CLASSIFIERS,
         ext_modules = cythonize("proteoTorch/cylibs/proteoTorch_qvalues.pyx",
                                 build_dir="build")
