@@ -55,7 +55,8 @@ def main():
         install_requires=[
             'numpy', 
             'sklearn', 
-            'torch'
+            'torch',
+            'Cython',
         ],
         classifiers=CLASSIFIERS,
         ext_modules = cythonize("proteoTorch/cylibs/proteoTorch_qvalues.pyx",
