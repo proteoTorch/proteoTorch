@@ -5,5 +5,5 @@ python:
   - "3.8"
 sudo: required
 install:
-  sudo pip install Cython
-  python3 setup.py install
+  - sudo pip3 install Cython
+  - python3 setup.py install
