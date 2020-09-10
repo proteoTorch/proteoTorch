@@ -5,5 +5,5 @@ python:
   - "3.8"
 sudo: required
 install:
-  - sudo pip install Cython
+  - sudo pip install Cython setuptools numpy sklearn torch
   - sudo python3 setup.py install

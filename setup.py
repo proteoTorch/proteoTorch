@@ -56,7 +56,7 @@ def main():
             'numpy', 
             'sklearn', 
             'torch',
-            'Cython',
+            'Cython'
         ],
         classifiers=CLASSIFIERS,
         ext_modules = cythonize("proteoTorch/cylibs/proteoTorch_qvalues.pyx",
