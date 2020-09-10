@@ -23,8 +23,7 @@ LICENSE='OSL-3.0'
 CLASSIFIERS = ["Natural Language :: English",
                "Development Status :: 3 - Alpha",
                "Intended Audience :: Science/Research",
-               "License :: OSI Approved :: The Open Software License 3.0 "
-               "(OSL-3.0)",
+               "License :: OSI Approved :: Open Software License 3.0 (OSL-3.0)",
                "Topic :: Scientific/Engineering :: Bio-Informatics",
                "Operating System :: MacOS",
                "Operating System :: Microsoft :: Windows",
@@ -53,11 +52,11 @@ def main():
         packages=find_packages(include=["proteoTorch", "proteoTorch.*, proteoTorch_solvers"]),
         url=URL,
         platforms=['any'],
-        # install_requires=[
-        #     'numpy', 
-        #     'sklearn', 
-        #     'torch'
-        # ],
+        install_requires=[
+            'numpy', 
+            'sklearn', 
+            'torch'
+        ],
         classifiers=CLASSIFIERS,
         ext_modules = cythonize("proteoTorch/cylibs/proteoTorch_qvalues.pyx",
                                 build_dir="build")
