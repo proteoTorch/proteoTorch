@@ -26,6 +26,6 @@ the MS/MS semi-supervised learning algorithm (with cross-validation) originally 
 * [Install](install.md)
 * [Quickstart](quickstart.md)
 * [Recalibrating MS/MS search results](analyze.md)
-* [Plotting utilities](analyze.md)
+* [Plotting utilities](plotting.md)
 * [API reference](api.md)
 * [Contact](contact.md)
