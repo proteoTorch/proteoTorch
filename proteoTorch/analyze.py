@@ -1489,7 +1489,6 @@ def mainIter(hyperparams):
             if hyperparams['tdc']:
                 writeOutput(_join(output_dir,'output_allPsms_iter' + str(i) + '.txt'), testScores, Y, pepstrings, qs)
             else:
-                # writeOutput(output_dir+'output_iter' + str(i) + '.txt', testScores, Y, pepstrings, qs)
                 writeOutput(_join(output_dir,'output_iter' + str(i) + '.txt'), testScores, Y, pepstrings, qs)
 
         # save current iteration's trained model parameters
@@ -1538,7 +1537,9 @@ def mainIter(hyperparams):
         #     writeOutput(_join(output_dir, 'output_pretdc.txt'), scores, Y, pepstrings, qs)
     else:         
         # Save final identifications
-        writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
+        # sort scores in descending order
+        inds = [i for i,s in sorted(enumerate(scores), reverse = True, key = lambda r: r[1])]
+        writeOutput(_join(output_dir, 'output.txt'), scores[inds], Y[inds], [pepstrings[i] for i in inds], [qs[i] for i in inds])
 
     return scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys
 
@@ -1692,13 +1693,17 @@ def tdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, test
     scores = doMergeScores(q, testKeys, testScores, Y, isSvm)
     taq, _, qs = calcQ(scores, Y, q, False)
     print("Could identify %d targets" % (len(taq)))
+
+    # sort scores in descending order
+    inds = [i for i,s in sorted(enumerate(scores), reverse = True, key = lambda r: r[1])]
+    writeOutput(_join(output_dir, 'output.txt'), scores[inds], Y[inds], [pepstrings[i] for i in inds], [qs[i] for i in inds])
             
-    writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
+    # writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
     return 0
 
 
-if __name__ == '__main__':
-
+# if __name__ == '__main__':
+def main():
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
@@ -1748,3 +1753,6 @@ if __name__ == '__main__':
     scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys = mainIter(params)
     if params["tdc"]:
         tdc(params, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys)
+
+if __name__ == '__main__':
+    main()

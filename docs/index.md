@@ -18,14 +18,15 @@ ProteoTorch provides the following semi-supervised machine learning classifiers:
  of [scikit-learn clf object instances](https://scikit-learn.org/stable/tutorial/basic/tutorial.html), with  
  training function *fit* and testing function *decision_function*
 
-Additionally, ProteoTorch provides an ultrafast q-value library (heavily optimized for Python),
+## Additional Features
+ProteoTorch also provides an ultrafast q-value library (heavily optimized for Python),
 plotting tools to benchmark/compare MS/MS post-processor results, and an easy-to-use Python API for
 the MS/MS semi-supervised learning algorithm (with cross-validation) originally implemented in the Percolator C++ package.
 
 ## Contents
 * [Install](install.md)
 * [Quickstart](quickstart.md)
-* [Recalibrating MS/MS search results](analyze.md)
+* [Post-processing MS/MS search results](analyze.md)
 * [Plotting utilities](plotting.md)
 * [API reference](api.md)
 * [Contact](contact.md)

@@ -502,6 +502,85 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass,
         fid.close()
     return scores, labels, ids
 
+def load_pin_scoresAndScanMass_bucket_tdc(filename, 
+                                          scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+                                          writeOutput = False, outputDirectory = None):
+    """ Take max PSM for each (scan, expmass) pair.  This skips checking whether PIN file contains a mix of TDC and mix-max
+        results.
+    """
+    allScores = {}
+    targetCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
+    decoyCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
+    mapScanMassToId = {}
+    expMassKey = 'ExpMass'
+    scanNrKey = 'ScanNr'
+
+    lineNum = 0
+    # Perform the competition
+    with open(filename, 'r') as f:
+        for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
+            lineNum += 1
+            # todo: add try excepts to the below
+            s = float(l[scoreKey])
+            label = int(l[labelKey])
+            # make sure expMassKey is valid
+            if expMassKey in l:
+                mass = l[expMassKey]
+            else:
+                raise ValueError('No expmass field in PeptideProphet output file, exitting.')
+                exit(-1)
+            if scanNrKey in l:
+                scan = l[scanNrKey]
+            else:
+                raise ValueError('No scan field in PeptideProphet output file, exitting.')
+                exit(-1)
+            # make sure scanNrKey is valid
+            # make sure idKey is valid
+            if idKey in l:
+                psmid = l[idKey]
+            else:
+                if 'SpecId' in l:
+                    idKey = 'SpecId'
+                    psmid = l[idKey]
+                else:
+                    raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
+                    exit(-1)
+
+            scanMassPair = (scan, mass)
+            if scanMassPair in allScores:
+                if s > allScores[scanMassPair][0]:
+                    allScores[scanMassPair] = (s,label)
+                    mapScanMassToId[scanMassPair] = psmid
+            else:
+                allScores[scanMassPair] = (s,label)
+                mapScanMassToId[scanMassPair] = psmid
+    print("Read %d scores" % (lineNum-1))
+    # Perform the competition
+    scores = []
+    labels = []
+    ids = []
+    if writeOutput: # Write new output file, avoid rerunning tdc post-processing
+        if not outputDirectory: # no output directory specified, just skip writing
+            print("Write tdc output selected but no output directory specified, moving on without writing.")
+            writeOutput = False
+        else:
+            if not os.path.exists(outputDirectory):
+                os.makedirs(outputDirectory)
+            # Use same filename, place in new directory
+            fid = open(os.path.join(outputDirectory, os.path.basename(filename)), 'w')
+            fid.write("%s\t%s\t%s\n" % (idKey, scoreKey, labelKey))
+    for scanMassPair in allScores:
+        s,l = allScores[scanMassPair]
+        psmid = mapScanMassToId[scanMassPair]
+        scores.append(s)
+        labels.append(l)
+        ids.append(psmid)
+        if writeOutput:
+            fid.write("%s\t%f\t%d\n" % (psmid, s, l))
+    if writeOutput:
+        fid.close()
+    return scores, labels, ids
+
 def psmId_diffs(inputPin, percFiles, pinFile, percScoreKey = 'score', pinScoreKey = 'score',
                 labelKey = "Label", idKey = "PSMId"):
     """ Check differences in PSM ids between output files
@@ -529,15 +608,21 @@ def psmId_diffs(inputPin, percFiles, pinFile, percScoreKey = 'score', pinScoreKe
         print("%d" % (sid))
     
 
-def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001, 
+def load_test_scores(filenames, desc, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0.001, 
                      tdc = False, psmIdToScanMass = {},
                      writeTdc = False, tdcDir = ''):
     """ Load all PSMs and features file
     """
     if len(filenames)==1:
         if tdc:
-            scores, labels, _ = load_pin_scores_bucket_tdc(filenames[0], psmIdToScanMass, scoreKey,
-                                                           writeOutput = writeTdc, outputDirectory = tdcDir)
+            # Check if it is was a peptideProphet run, in which case expmass and scannr must have 
+            # been supplied
+            if desc.lower()=='peptideprophet':
+                scores, labels, _ = load_pin_scoresAndScanMass_bucket_tdc(filenames[0], scoreKey,
+                                                                          writeOutput = writeTdc, outputDirectory = tdcDir)
+            else:
+                scores, labels, _ = load_pin_scores_bucket_tdc(filenames[0], psmIdToScanMass, scoreKey,
+                                                               writeOutput = writeTdc, outputDirectory = tdcDir)
         else:
             scores, labels, _ = load_pin_scores(filenames[0], scoreKey)
     elif len(filenames)==2: # Assume these are Percolator results, where target is specified followed by decoy
@@ -567,11 +652,6 @@ def load_test_scores(filenames, scoreKey = 'score', qTol = 0.01, qCurveCheck = 0
         quac.append(numIdentifiedAtQ / den)
         if q < qCurveCheck:
             ind0 = ind
-    # print "Accuracy = %f%%" % (numIdentifiedAtQ / float(len(qs)) * 100)
-    # set AUC weights to uniform 
-    # auc = np.trapz(quac)#/len(quac)#/quac[-1]
-    # if qTol > qCurveCheck:
-    #     auc = 0.3 * auc + 0.7 * np.trapz(quac)#/ind0#/quac[ind0-1]
     return qs, ps, numIdentifiedAtQ
 
 
@@ -861,7 +941,7 @@ def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
         pylab.savefig('%s' % output)
     
 
-def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = False, tdcOutputDir = ''):
+def mainPlot(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = False, tdcOutputDir = ''):
     '''
     input:
         
@@ -879,7 +959,6 @@ def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = Fa
     mapIdToScanMass = {}
     if doTdc:
         # Note: (scannr, expmass) pairs are used to determine PSMs for target-decoy competition
-        # pepstrings, _, _, _, sids, expMasses = load_pin_return_featureMatrix(dataset, normalize = False)
         pepstrings, _, sids, expMasses = load_pin_return_scanExpmassPairs(dataset)
         # determine mapping from PSMId/SpecId to (scannr, expmass)
         for p, s, em in zip(pepstrings,sids,expMasses):
@@ -889,7 +968,7 @@ def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = Fa
     def process(arg):
         desc, scoreKey, fn = parse_arg(arg)
         methods.append(desc)
-        qs, ps, naq = load_test_scores(fn, scoreKey, tdc = doTdc, 
+        qs, ps, naq = load_test_scores(fn, desc, scoreKey, tdc = doTdc, 
                                        psmIdToScanMass = mapIdToScanMass,
                                        writeTdc = writeTdcResults, tdcDir = tdcOutputDir)
         scorelists.append( (qs, ps) )
@@ -900,7 +979,8 @@ def main(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = Fa
 
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
+def main():
     usage = """Usage: %prog [options] label1:IDENT1 ... labeln:IDENTn\n\n
             
              Example for using on percolator:     python THIS_SCRIPT.py --output Perc.png "Percolator":score:percTargets.txt:percDecoys.txt
@@ -919,6 +999,8 @@ if __name__ == '__main__':
     (OPTIONS, ARGS) = parser.parse_args()
 
     assert len(ARGS) >= 1, 'No identification and model output files listed.'
-    main(ARGS, OPTIONS.output, OPTIONS.maxq, OPTIONS.tdc, OPTIONS.dataset, 
-         OPTIONS.writeTdcResults, OPTIONS.tdcOutputDir)
+    mainPlot(ARGS, OPTIONS.output, OPTIONS.maxq, OPTIONS.tdc, OPTIONS.dataset, 
+             OPTIONS.writeTdcResults, OPTIONS.tdcOutputDir)
     
+if __name__ == '__main__':
+    main()

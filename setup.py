@@ -60,7 +60,9 @@ def main():
         ],
         classifiers=CLASSIFIERS,
         ext_modules = cythonize("proteoTorch/cylibs/proteoTorch_qvalues.pyx",
-                                build_dir="build")
+                                build_dir="build"),
+        entry_points = {'console_scripts': ['proteoTorch = proteoTorch.analyze:main',
+                                            'proteoTorchPlot = proteoTorch.plotQvals:main']}
     )
 
 if __name__ == "__main__":
