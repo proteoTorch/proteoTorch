@@ -439,23 +439,56 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
 
 def load_pin_scores_bucket_tdc(filename, mapIdToScanMass, 
                                scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+                               qTol = 0.01,
                                writeOutput = False, outputDirectory = None):
-    """ Take max PSM for each (scan, expmass) pair.  This skips checking whether PIN file contains a mix of TDC and mix-max
-        results.
+    """ Take max PSM for each (scan, expmass) pair/bucket.
     """
     allScores = {}
-    targetCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
-    decoyCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
     mapScanMassToId = {}
 
     lineNum = 0
-    # Perform the competition
+    # arrays of all scores/labels to check whether scores should be multiplied
+    # by negative one (i.e., lower is better) or not
+    flat_scores = [] 
+    flat_labels = []
+    
+    posOrNegative_coeff = 1. # multiply scores by -1 if smaller means better
+
+    # Load file
     with open(filename, 'r') as f:
         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
             lineNum += 1
-            # todo: add try excepts to the below
-            s = float(l[scoreKey])
-            label = int(l[labelKey])
+            try:
+                s = float(l[scoreKey])
+            except ValueError:
+                print("Error: no score field %s on line %d, exitting" % (scoreKey, lineNum))
+            try:
+                label = int(l[labelKey])
+            except ValueError:
+                print("Error: no label field %s on line %d, exitting" % (labelKey, lineNum))
+            flat_scores.append(s)
+            flat_labels.append(label)
+
+        # Check scores multiplied by both 1 and positive -1
+        taq, _, _ = calcQ(flat_scores, flat_labels, qTol, False)
+        taq2, _, _ = calcQ([-1. * s for s in flat_scores], flat_labels, qTol, False)
+        if len(taq2) > len(taq):
+            print("Detected smaller scores mean better performance for target-decoy competition")
+            posOrNegative_coeff = -1.
+
+        # Start from beginning of file and perform the competition
+        f.seek(0)
+        lineNum = 0
+        for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
+            lineNum += 1
+            try:
+                s = posOrNegative_coeff * float(l[scoreKey])
+            except ValueError:
+                print("Error: no score field %s on line %d of file %s, exitting" % (filename, scoreKey, lineNum))
+            try:
+                label = int(l[labelKey])
+            except ValueError:
+                print("Error: no label field %s on line %d of file %s, exitting" % (filename, labelKey, lineNum))
             # make sure idKey is valid
             if idKey in l:
                 psmid = l[idKey]
@@ -464,7 +497,7 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass,
                     idKey = 'SpecId'
                     psmid = l[idKey]
                 else:
-                    raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
+                    raise ValueError("idKey is invalid, neither SpecId or PSMId in file %s.  Exitting" % (filename))
                     exit(-1)
 
             scanMassPair = mapIdToScanMass[psmid]
@@ -476,11 +509,11 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass,
                 allScores[scanMassPair] = (s,label)
                 mapScanMassToId[scanMassPair] = psmid
     print("Read %d scores" % (lineNum-1))
-    # Perform the competition
-    scores = []
-    labels = []
-    ids = []
-    if writeOutput: # Write new output file, avoid rerunning tdc post-processing
+
+
+    # Write new output file, avoid rerunning tdc post-processing
+    # note: new file remains open until the penultimate line of this function
+    if writeOutput: 
         if not outputDirectory: # no output directory specified, just skip writing
             print("Write tdc output selected but no output directory specified, moving on without writing.")
             writeOutput = False
@@ -490,6 +523,11 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass,
             # Use same filename, place in new directory
             fid = open(os.path.join(outputDirectory, os.path.basename(filename)), 'w')
             fid.write("%s\t%s\t%s\n" % (idKey, scoreKey, labelKey))
+
+    # Return winning PSMs per (ExpMass, ScanNr) bucket
+    scores = []
+    labels = []
+    ids = []
     for scanMassPair in allScores:
         s,l = allScores[scanMassPair]
         psmid = mapScanMassToId[scanMassPair]
@@ -504,38 +542,73 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass,
 
 def load_pin_scoresAndScanMass_bucket_tdc(filename, 
                                           scoreKey = "score", labelKey = "Label", idKey = "PSMId",
+                                          qTol = 0.01,
                                           writeOutput = False, outputDirectory = None):
-    """ Take max PSM for each (scan, expmass) pair.  This skips checking whether PIN file contains a mix of TDC and mix-max
-        results.
+    """ Take max PSM for each (scan, expmass) pair/bucket.  Used for result files that contain columns ExpMass and ScanNr
+
+        Note: two passes are performed on the input file, one to check whether higher or lower scores  = "good PSM" and the
+              a second to conduct the actual competition
     """
     allScores = {}
-    targetCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
-    decoyCheck = set([]) # simple check to make sure we have both a target and decoy PSM per spectrum
     mapScanMassToId = {}
     expMassKey = 'ExpMass'
     scanNrKey = 'ScanNr'
 
     lineNum = 0
-    # Perform the competition
+    # arrays of all scores/labels to check whether scores should be multiplied
+    # by negative one (i.e., lower is better) or not
+    flat_scores = [] 
+    flat_labels = []
+    
+    posOrNegative_coeff = 1. # multiply scores by -1 if smaller means better
+    # Load file
     with open(filename, 'r') as f:
         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
             lineNum += 1
-            # todo: add try excepts to the below
-            s = float(l[scoreKey])
-            label = int(l[labelKey])
+            try:
+                s = float(l[scoreKey])
+            except ValueError:
+                print("Error: no score field %s on line %d, exitting" % (scoreKey, lineNum))
+            try:
+                label = int(l[labelKey])
+            except ValueError:
+                print("Error: no label field %s on line %d, exitting" % (labelKey, lineNum))
+            flat_scores.append(s)
+            flat_labels.append(label)
+
+        # Check scores multiplied by both 1 and positive -1
+        taq, _, _ = calcQ(flat_scores, flat_labels, qTol, False)
+        taq2, _, _ = calcQ([-1. * s for s in flat_scores], flat_labels, qTol, False)
+        if len(taq2) > len(taq):
+            print("Detected smaller scores mean better performance for target-decoy competition")
+            posOrNegative_coeff = -1.
+
+        # Start from beginning of file and perform the competition
+        f.seek(0)
+        lineNum = 0
+        # Perform the target-decoy competition
+        for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
+            lineNum += 1
+            try:
+                s = posOrNegative_coeff * float(l[scoreKey])
+            except ValueError:
+                print("Error: no score field %s on line %d of file %s, exitting" % (filename, scoreKey, lineNum))
+            try:
+                label = int(l[labelKey])
+            except ValueError:
+                print("Error: no label field %s on line %d of file %s, exitting" % (filename, labelKey, lineNum))
             # make sure expMassKey is valid
             if expMassKey in l:
                 mass = l[expMassKey]
             else:
-                raise ValueError('No expmass field in PeptideProphet output file, exitting.')
+                raise ValueError('No expmass field in file %s, exitting.' % (filename))
                 exit(-1)
             if scanNrKey in l:
                 scan = l[scanNrKey]
             else:
-                raise ValueError('No scan field in PeptideProphet output file, exitting.')
+                raise ValueError('No scan field in file %s, exitting.' % (filename))
                 exit(-1)
-            # make sure scanNrKey is valid
-            # make sure idKey is valid
+            # make sure scanNrKey and idKey are valid
             if idKey in l:
                 psmid = l[idKey]
             else:
@@ -545,7 +618,7 @@ def load_pin_scoresAndScanMass_bucket_tdc(filename,
                 else:
                     raise ValueError("idKey is invalid, neither SpecId or PSMId.  Exitting")
                     exit(-1)
-
+            # Perform the competition per bucket
             scanMassPair = (scan, mass)
             if scanMassPair in allScores:
                 if s > allScores[scanMassPair][0]:
@@ -555,11 +628,10 @@ def load_pin_scoresAndScanMass_bucket_tdc(filename,
                 allScores[scanMassPair] = (s,label)
                 mapScanMassToId[scanMassPair] = psmid
     print("Read %d scores" % (lineNum-1))
-    # Perform the competition
-    scores = []
-    labels = []
-    ids = []
-    if writeOutput: # Write new output file, avoid rerunning tdc post-processing
+
+    # Write new output file, avoid rerunning tdc post-processing
+    # note: new file remains open until the penultimate line of this function
+    if writeOutput:
         if not outputDirectory: # no output directory specified, just skip writing
             print("Write tdc output selected but no output directory specified, moving on without writing.")
             writeOutput = False
@@ -569,6 +641,11 @@ def load_pin_scoresAndScanMass_bucket_tdc(filename,
             # Use same filename, place in new directory
             fid = open(os.path.join(outputDirectory, os.path.basename(filename)), 'w')
             fid.write("%s\t%s\t%s\n" % (idKey, scoreKey, labelKey))
+
+    # Return winning PSMs per (ExpMass, ScanNr) bucket
+    scores = []
+    labels = []
+    ids = []
     for scanMassPair in allScores:
         s,l = allScores[scanMassPair]
         psmid = mapScanMassToId[scanMassPair]
@@ -617,30 +694,41 @@ def load_test_scores(filenames, desc, scoreKey = 'score', qTol = 0.01, qCurveChe
         if tdc:
             # Check if it is was a peptideProphet run, in which case expmass and scannr must have 
             # been supplied
-            if desc.lower()=='peptideprophet':
+            if desc.lower()=='peptideprophet' or desc.lower()=='scavager' or desc.lower()=='qranker' or desc.lower()=='q-ranker':
                 scores, labels, _ = load_pin_scoresAndScanMass_bucket_tdc(filenames[0], scoreKey,
+                                                                          qTol = qTol,
                                                                           writeOutput = writeTdc, outputDirectory = tdcDir)
             else:
                 scores, labels, _ = load_pin_scores_bucket_tdc(filenames[0], psmIdToScanMass, scoreKey,
+                                                               qTol = qTol,
                                                                writeOutput = writeTdc, outputDirectory = tdcDir)
         else:
             scores, labels, _ = load_pin_scores(filenames[0], scoreKey)
     elif len(filenames)==2: # Assume these are Percolator results, where target is specified followed by decoy
         if tdc:
+            # Note: since we're assuming only Percolator files for this scenario, we're not checking whether
+            # lower scores mean better PSM scores, we're actually assuming the opposite.  If post-processors other than
+            # Percolator are to be used or this scenario is meant to be generalized, we should add internal checks
+            # to determine whether higher/lower scores are better to the bucket_tdc function below 
             scores, labels = load_percolator_target_decoy_files_bucket_tdc(filenames, psmIdToScanMass, scoreKey,
                                                                            writeOutput = writeTdc, outputDirectory = tdcDir)
         else:
             scores, labels, _ = load_percolator_target_decoy_files(filenames, scoreKey)
     else:
         raise ValueError('Number of filenames supplied for a single method was > 2, exitting.\n')
-    # Check scores multiplied by both 1 and positive -1
-    taq, _, _ = calcQ(scores, labels, qTol, False)
-    taq2, _, _ = calcQ([-1. * s for s in scores], labels, qTol, False)
+    if not tdc:
+        # Check scores multiplied by both 1 and positive -1
+        taq, _, _ = calcQ(scores, labels, qTol, False)
+        taq2, _, _ = calcQ([-1. * s for s in scores], labels, qTol, False)
 
-    if(len(taq)>len(taq2)):
-        qs, ps = calcQAndNumIdentified(scores, labels)
+        if(len(taq)>len(taq2)):
+            qs, ps = calcQAndNumIdentified(scores, labels)
+        else:
+            qs, ps = calcQAndNumIdentified([-1. * s for s in scores], labels)
     else:
-        qs, ps = calcQAndNumIdentified([-1. * s for s in scores], labels)
+        # Note: this must be done before the target decoy competition
+        qs, ps = calcQAndNumIdentified(scores, labels)
+
     numIdentifiedAtQ = 0
     quac = []
     den = float(len(scores))
@@ -676,7 +764,6 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
     pylab.clf()
     pylab.xlabel(xlabel)
     pylab.ylabel(ylabel)
-    # pylab.nipy_spectral()
     pylab.gray()
     h = -1
     for i,(q,p) in enumerate(scorelists):
@@ -685,6 +772,7 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
     pylab.xlim([0,qrange])
     pylab.ylim([0, h])
     pylab.legend(labels, loc = 'lower right')
+    print("Evaluated %d methods, saving plot to %s" % (len(labels), output))
     pylab.savefig(output, bbox_inches='tight')
 
 def scatterDecoyRanks(ranksA, ranksB):
@@ -972,7 +1060,7 @@ def mainPlot(args, output, maxq, doTdc = False, dataset = None, writeTdcResults 
                                        psmIdToScanMass = mapIdToScanMass,
                                        writeTdc = writeTdcResults, tdcDir = tdcOutputDir)
         scorelists.append( (qs, ps) )
-        print ('%s: %d identifications, %d identified at q <= 0.01' % (desc, len(qs), naq))
+        print ('%s: %d identifications, %d identified at q <= 0.01\n' % (desc, len(qs), naq))
     for argument in args:
         process(argument)
     plot(scorelists, output, maxq, methods)
