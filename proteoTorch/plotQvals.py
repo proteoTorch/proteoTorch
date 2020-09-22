@@ -13,6 +13,7 @@ import numpy as np
 import optparse
 import sys
 import csv
+import gzip
 
 def err_print(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -31,7 +32,7 @@ import numpy
 from proteoTorch.analyze import (calcQAndNumIdentified, givenPsmIds_writePin, 
                                  load_pin_return_featureMatrix, load_pin_return_scanExpmassPairs,
                                  calculateTargetDecoyRatio, searchForInitialDirection_split,
-                                 calcQ, getDecoyIdx, sortRowIndicesBySid)
+                                 calcQ, getDecoyIdx, sortRowIndicesBySid, checkGzip_openfile)
 from scipy.spatial import distance
 
 def calcDistanceMat(testMat,trainMat, metric = 'euclidean'):
@@ -96,7 +97,7 @@ def disagreedPsms_computeSimilarity(pin, disagreedPsmsFile, seed = 1):
 
     # load disagreed PSMs
     psmIds = []
-    with open(disagreedPsmsFile, 'r') as f:
+    with checkGzip_openfile(disagreedPsmsFile, 'rt') as f:
         try:
             psmIds = set([l["PSMId"] for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True)])
         except ValueError:
@@ -166,7 +167,7 @@ def load_percolator_output(filename, scoreKey = "score", maxPerSid = False, idKe
     List of scores
     """
     if not maxPerSid:
-        with open(filename, 'r') as f:
+        with checkGzip_openfile(filename, 'rt') as f:
             scores = []
             ids = []
             for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
@@ -420,7 +421,7 @@ def load_pin_scores(filename, scoreKey = "score", labelKey = "Label", idKey = "P
     labels = []
     ids = []
     lineNum = 0
-    with open(filename, 'r') as f:
+    with checkGzip_openfile(filename, 'rt') as f:
         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
             lineNum += 1
             label = int(l[labelKey])
@@ -455,7 +456,7 @@ def load_pin_scores_bucket_tdc(filename, mapIdToScanMass,
     posOrNegative_coeff = 1. # multiply scores by -1 if smaller means better
 
     # Load file
-    with open(filename, 'r') as f:
+    with checkGzip_openfile(filename, 'rt') as f:
         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
             lineNum += 1
             try:
@@ -562,7 +563,7 @@ def load_pin_scoresAndScanMass_bucket_tdc(filename,
     
     posOrNegative_coeff = 1. # multiply scores by -1 if smaller means better
     # Load file
-    with open(filename, 'r') as f:
+    with checkGzip_openfile(filename, 'rt') as f:
         for l in csv.DictReader(f, delimiter = '\t', skipinitialspace = True):
             lineNum += 1
             try:

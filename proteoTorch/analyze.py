@@ -112,7 +112,7 @@ def subsample_pin(filename, outputFile, outputFile2 = '', sampleRatio = 0.1):
         Normal tide features
         SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
     """
-    with checkGzip_openfile(filename, 'r') as f:
+    with checkGzip_openfile(filename, 'rt') as f:
         r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
         headerInOrder = r.fieldnames
         l = headerInOrder
@@ -175,11 +175,11 @@ def givenPsmIds_writePin(filename, psmIdFile):
         Normal tide features
         SpecId	Label	ScanNr	lnrSp	deltLCn	deltCn	score	Sp	IonFrac	Mass	PepLen	Charge1	Charge2	Charge3	enzN	enzC	enzInt	lnNumSP	dm	absdM	Peptide	Proteins
     """
-    with checkGzip_openfile(psmIdFile, 'r') as f0:
+    with checkGzip_openfile(psmIdFile, 'rt') as f0:
         psms = set([l["PSMId"] for l in csv.DictReader(f0)])
         print("Loaded %d PMS IDs" % len(psms))
 
-    with checkGzip_openfile(filename, 'r') as f:
+    with checkGzip_openfile(filename, 'rt') as f:
         r = csv.DictReader(f, delimiter = '\t', skipinitialspace = True)
         headerInOrder = r.fieldnames
         l = headerInOrder
