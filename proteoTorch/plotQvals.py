@@ -29,10 +29,16 @@ except ImportError:
 import itertools
 import numpy
 
-from proteoTorch.analyze import (calcQAndNumIdentified, givenPsmIds_writePin, 
+try:
+    from proteoTorch_qvalues import calcQ, calcQAndNumIdentified # load cython library
+except:
+    print("Warning: Cython q-value not found, loading strictly python q-value library, which slows down analysis significantly.")
+    from proteoTorch.pyfiles.qvalsBase import calcQ, calcQAndNumIdentified # import unoptimized q-value calculation
+
+from proteoTorch.analyze import (givenPsmIds_writePin, 
                                  load_pin_return_featureMatrix, load_pin_return_scanExpmassPairs,
                                  calculateTargetDecoyRatio, searchForInitialDirection_split,
-                                 calcQ, getDecoyIdx, sortRowIndicesBySid, checkGzip_openfile)
+                                 getDecoyIdx, sortRowIndicesBySid, checkGzip_openfile)
 from scipy.spatial import distance
 
 def calcDistanceMat(testMat,trainMat, metric = 'euclidean'):
@@ -718,31 +724,39 @@ def load_test_scores(filenames, desc, scoreKey = 'score', qTol = 0.01, qCurveChe
     else:
         raise ValueError('Number of filenames supplied for a single method was > 2, exitting.\n')
     if not tdc:
-        # Check scores multiplied by both 1 and positive -1
-        taq, _, _ = calcQ(scores, labels, qTol, False)
-        taq2, _, _ = calcQ([-1. * s for s in scores], labels, qTol, False)
+        # taq, _, _ = calcQ(scores, labels, qTol, False)
+        # taq2, _, _ = calcQ([-1. * s for s in scores], labels, qTol, False)
 
-        if(len(taq)>len(taq2)):
-            qs, ps = calcQAndNumIdentified(scores, labels)
+        # Check scores multiplied by both 1 and positive -1
+        qsA, psA = calcQAndNumIdentified(scores, labels)
+        qsB, psB = calcQAndNumIdentified([-1. * s for s in scores], labels)
+
+        taqA = 0.
+        taqB = 0.
+        for ind, (q, p) in enumerate(zip(qsA, psA)):
+            if q > qTol:
+                break
+            taqA = float(p)
+
+        for ind, (q, p) in enumerate(zip(qsB, psB)):
+            if q > qTol:
+                break
+            taqB = float(p)
+
+        if taqA > taqB:
+            return qsA, psA, taqA
         else:
-            qs, ps = calcQAndNumIdentified([-1. * s for s in scores], labels)
+            return qsB, psB, taqB
     else:
         # Note: this must be done before the target decoy competition
         qs, ps = calcQAndNumIdentified(scores, labels)
 
-    numIdentifiedAtQ = 0
-    quac = []
-    den = float(len(scores))
-    ind0 = -1    
-    for ind, (q, p) in enumerate(zip(qs, ps)):
-        if q > qTol:
-            break
-        numIdentifiedAtQ = float(p)
-        quac.append(numIdentifiedAtQ / den)
-        if q < qCurveCheck:
-            ind0 = ind
-    return qs, ps, numIdentifiedAtQ
-
+        numIdentifiedAtQ = 0
+        for ind, (q, p) in enumerate(zip(qs, ps)):
+            if q > qTol:
+                break
+            numIdentifiedAtQ = float(p)
+        return qs, ps, numIdentifiedAtQ
 
 #############################################
 # Scoring method plotting utilities
