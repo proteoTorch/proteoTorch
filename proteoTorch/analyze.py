@@ -1460,7 +1460,7 @@ def mainIter(hyperparams):
     trained_models = []
     drop_out_rate = hyperparams['dnn_dropout_rate']
     hyperparams['dnn_dropout_rate'] = hyperparams['starting_dropout_rate']
-    write_output_per_iter = not hyperparams['do_not_write_output_per_iter']
+    write_output_per_iter = hyperparams['write_output_per_iter']
     if hyperparams['method'] == 3:
         q = hyperparams['deepq']
     else:
@@ -1646,8 +1646,8 @@ def tdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, test
     fpoo = 0 # number of identifications from previous, previous iteration
     trained_models = []
     drop_out_rate = hyperparams['dnn_dropout_rate']
-    hyperparams['dnn_dropout_rate'] = 0. # hyperparams['starting_tdc_dropout_rate']
-    write_output_per_iter = not hyperparams['do_not_write_output_per_iter']
+    hyperparams['dnn_dropout_rate'] = 0.
+    write_output_per_iter = hyperparams['write_output_per_iter']
     if hyperparams['method'] == 3:
         q = hyperparams['deepq']
     else:
@@ -1698,28 +1698,46 @@ def tdc(hyperparams, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, test
     inds = [i for i,s in sorted(enumerate(scores), reverse = True, key = lambda r: r[1])]
     writeOutput(_join(output_dir, 'output.txt'), scores[inds], Y[inds], [pepstrings[i] for i in inds], [qs[i] for i in inds])
             
-    # writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
     return 0
 
+def check_arg_trueFalse(a):
+    """ Check boolean command line options 
+    
+    inputs:
+    a - command line option
 
-# if __name__ == '__main__':
+    outputs:
+    True for '1' and all lower/upper case versions of 't' or 'true'
+    False for '0' and all lower/upper case versions of 'f' or 'false'
+
+    exception is thrown if a python string is not input
+    """
+    try:
+        a = a.lower()
+    except:
+        print("Supplied argument %s must be a string indicating true or false, exitting" % a)
+        exit(-1)
+    if a == 't' or a == 'true' or a == '1':
+        return True
+    if a== 'f' or a == 'false' or a == '0':
+        return False
+
+
 def main():
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
-    parser.add_option('--load_previous_dnn', action= 'store_true', help = 'Start iterations from previously trained model saved in output_dir')
-    parser.add_option('--tdc', action= 'store_true', help = 'Use target-decoy competition to assign q-values.')
+    parser.add_option('--load_previous_dnn', type = 'string', default = 'true', help = 'Start iterations from previously trained model saved in output_dir')
+    parser.add_option('--tdc', type = 'string', default = 'true', help = 'Use target-decoy competition to assign q-values.')
     parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
-    parser.add_option('--do_not_write_output_per_iter', action= 'store_true', help = 'Do not write recalibrated psms after every X iterations, where X = --output_per_iter_granularity.')
+    parser.add_option('--write_output_per_iter', type = 'string', default = 'true', help = 'Do not write recalibrated psms after every X iterations, where X = --output_per_iter_granularity.')
     parser.add_option('--output_per_iter_granularity', type = 'int', action= 'store', default = 5, help = 'Number of iterations to write recalibrated psms.')
-    parser.add_option('--deepInitDirection', action= 'store_true', help = 'Perform initial direction search using deep models.')
+    parser.add_option('--deepInitDirection', type = 'string', default = 'true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
     parser.add_option('--numThreads', type = 'int', action= 'store', default=1)
-    parser.add_option('--verbose', type = 'int', action= 'store', default = 3)
+    parser.add_option('--verbose', type = 'int', action= 'store', default = 1)
     parser.add_option('--method', type = 'int', action= 'store', default = 3, 
-                      help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver SVMLIN; Method 3: DNN (MLP)')
-    parser.add_option('--methods', type = 'string', action= 'store', default = '3', 
-                      help = 'String binding which method to run at which iteration.  See method input for more info about available methods.')
+                      help = 'Method 0: LDA; Method 1: linear SVM, solver TRON; Method 2: linear SVM, solver L2-SVM-MFN; Method 3: DNN (MLP)')
     parser.add_option('--maxIters', type = 'int', action= 'store', default = 10, help='number of iterations; runs on multiple splits per iterations.') #4
     parser.add_option('--pin', type = 'string', action= 'store', help='input file in PIN format')
     parser.add_option('--output_dir', type = 'string', action= 'store', default=None, help='Defaults to model_output/<data_file_name>/<time_stamp>/')
@@ -1749,7 +1767,19 @@ def main():
     global _verb, _seed
     _verb = params['verbose']
     _seed= params['seed']
-
+    ########################
+    # Parameter value checks
+    ########################
+    # If including more boolean parameters, add to list trueOrFalse_params to check input
+    # values and set to true or false
+    trueOrFalse_params = ['load_previous_dnn', 'tdc', 'write_output_per_iter', 'deepInitDirection']
+    for tf_param in trueOrFalse_params:
+        params[tf_param] = check_arg_trueFalse(params[tf_param])
+    if params["method"]==3:
+        params['deepInitDirection'] = False
+    else:
+        params["tdc"] = False
+        
     scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys = mainIter(params)
     if params["tdc"]:
         tdc(params, scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys)
