@@ -1775,10 +1775,11 @@ def main():
     trueOrFalse_params = ['load_previous_dnn', 'tdc', 'write_output_per_iter', 'deepInitDirection']
     for tf_param in trueOrFalse_params:
         params[tf_param] = check_arg_trueFalse(params[tf_param])
-    if params["method"]==3:
+    if params["method"]!=3:
         params['deepInitDirection'] = False
-    else:
         params["tdc"] = False
+    else:
+        params['deepInitDirection'] = True
         
     scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys = mainIter(params)
     if params["tdc"]:
