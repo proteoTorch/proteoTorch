@@ -38,7 +38,7 @@ except:
 from proteoTorch.analyze import (givenPsmIds_writePin, 
                                  load_pin_return_featureMatrix, load_pin_return_scanExpmassPairs,
                                  calculateTargetDecoyRatio, searchForInitialDirection_split,
-                                 getDecoyIdx, sortRowIndicesBySid, checkGzip_openfile)
+                                 getDecoyIdx, sortRowIndicesBySid, checkGzip_openfile, check_arg_trueFalse)
 from scipy.spatial import distance
 
 def calcDistanceMat(testMat,trainMat, metric = 'euclidean'):
@@ -796,7 +796,7 @@ def scatterDecoyRanks(ranksA, ranksB):
     pylab.scatter(ranksA, ranksB, color = 'b')
     pylab.xlabel("DeepMS")
     pylab.ylabel("Percolator")
-    pylab.savefig(fn)
+    pylab.savefig(fn, bbox_inches='tight')
 
 def disagreedDecoys(psmsA, labelsA, psmsB, labelsB, psmsIds,
                     outputFile,
@@ -945,7 +945,7 @@ def histogram(targets, decoys, output, bins = 40, prob = False):
     _, _, h2 = pylab.hist(decoys, bins = bins, range = (l,h), density = prob,
                           color = 'm', alpha = 0.25)
     pylab.legend((h1[0], h2[0]), ('Target Scores', 'Decoy Scores'), loc = 'best')
-    pylab.savefig('%s' % output)
+    pylab.savefig('%s' % output, bbox_inches='tight')
 
 
 def scatterplot(deepMsFile, percolatorTargetFile, percolatorDecoyFile, fn, plotLabels = None):
@@ -1025,7 +1025,7 @@ def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
         _, _, h2 = pylab.hist(decoys, bins = bins, range = (l,h), density = prob,
                               color = 'm', alpha = 0.25)
         pylab.legend((h1[0], h2[0]), ('Target Scores', 'Decoy Scores'), loc = 'best')
-        pylab.savefig('%s' % output)
+        pylab.savefig('%s' % output, bbox_inches='tight')
 
         # Next, subset
         output = output_dir + '/' + feature + '.png'
@@ -1041,7 +1041,7 @@ def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
         h = max(x)
         _, _, h1 = pylab.hist(x, bins = bins, range = (l,h), density = prob,
                               color = 'b')
-        pylab.savefig('%s' % output)
+        pylab.savefig('%s' % output, bbox_inches='tight')
     
 
 def mainPlot(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = False, tdcOutputDir = ''):
@@ -1093,15 +1093,23 @@ def main():
             'names of spectrum identification files.')
     parser = optparse.OptionParser(usage = usage, description = desc)
     parser.add_option('--output', type = 'string', default='figure.png', help = 'Output file name where the figure will be stored.')
-    parser.add_option('--maxq', type = 'float', default = 1.0, help = 'Maximum q-value to plot to: 0 < q <= 1.0')
-    parser.add_option('--tdc', action = "store_true", help = 'Perform target-decoy competition')
-    parser.add_option('--dataset', type = 'string', help = 'Original processed dataset in PIN format.  Only necessary if tdc or mixmax set to True.')
-    parser.add_option('--writeTdcResults', action = "store_true", help = 'Write the results of TDC for all methods to new files.')
+    parser.add_option('--maxq', type = 'float', default = 0.1, help = 'Maximum q-value to plot to: 0 < q <= 1.0')
+    parser.add_option('--tdc', type = 'string', default = 'true', help = 'Perform target-decoy competition')
+    parser.add_option('--dataset', type = 'string', help = 'Original processed dataset in PIN format.  Only necessary if tdc set to True.')
+    parser.add_option('--writeTdcResults', type = 'string', default = 'false', help = 'Write the results of TDC for all methods to new files.')
     parser.add_option('--tdcOutputDir', type = 'string', default = '', help = 'Output directory to write TDC competition results.')
 
     (OPTIONS, ARGS) = parser.parse_args()
 
     assert len(ARGS) >= 1, 'No identification and model output files listed.'
+
+    ########################
+    # Parameter value checks
+    ########################
+    OPTIONS.tdc = check_arg_trueFalse(OPTIONS.tdc)
+    OPTIONS.writeTdcResults = check_arg_trueFalse(OPTIONS.writeTdcResults)
+
+
     mainPlot(ARGS, OPTIONS.output, OPTIONS.maxq, OPTIONS.tdc, OPTIONS.dataset, 
              OPTIONS.writeTdcResults, OPTIONS.tdcOutputDir)
     

@@ -1526,15 +1526,6 @@ def mainIter(hyperparams):
         # Update train and test partitions for further processing
         trainKeys, testKeys = mapTrainTestKeys(trainKeys, testKeys, tdcWinners)
         writeOutput(_join(output_dir, 'output_pretdc.txt'), scores, Y, pepstrings, qs)
-
-        # numSubPsms = float(len(scores))
-        # psmRat = numSubPsms / numAllPsms
-        # if psmRat > 0.99:
-        #     hyperparams['tdc'] = False
-        #     # Save final identifications
-        #     writeOutput(_join(output_dir, 'output.txt'), scores, Y, pepstrings, qs)
-        # else:
-        #     writeOutput(_join(output_dir, 'output_pretdc.txt'), scores, Y, pepstrings, qs)
     else:         
         # Save final identifications
         # sort scores in descending order
@@ -1727,10 +1718,10 @@ def main():
     parser = optparse.OptionParser()
     parser.add_option('--q', type = 'float', action= 'store', default = 0.01)
     parser.add_option('--deepq', type = 'float', action= 'store', default = 0.07)
-    parser.add_option('--load_previous_dnn', type = 'string', default = 'true', help = 'Start iterations from previously trained model saved in output_dir')
+    parser.add_option('--load_previous_dnn', type = 'string', default = 'false', help = 'Start iterations from previously trained model saved in output_dir')
     parser.add_option('--tdc', type = 'string', default = 'true', help = 'Use target-decoy competition to assign q-values.')
     parser.add_option('--previous_dnn_dir', type = 'string', action= 'store', default=None, help='Previous output directory containing trained dnn weights.')
-    parser.add_option('--write_output_per_iter', type = 'string', default = 'true', help = 'Do not write recalibrated psms after every X iterations, where X = --output_per_iter_granularity.')
+    parser.add_option('--write_output_per_iter', type = 'string', default = 'true', help = 'Write recalibrated psms after every X iterations, where X = --output_per_iter_granularity.')
     parser.add_option('--output_per_iter_granularity', type = 'int', action= 'store', default = 5, help = 'Number of iterations to write recalibrated psms.')
     parser.add_option('--deepInitDirection', type = 'string', default = 'true', help = 'Perform initial direction search using deep models.')
     parser.add_option('--initDirection', type = 'int', action= 'store', default=-1)
@@ -1742,22 +1733,21 @@ def main():
     parser.add_option('--pin', type = 'string', action= 'store', help='input file in PIN format')
     parser.add_option('--output_dir', type = 'string', action= 'store', default=None, help='Defaults to model_output/<data_file_name>/<time_stamp>/')
     parser.add_option('--seed', type = 'int', action= 'store', default = 1)
-    parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 60, help='number of epochs for training the DNN model.')
+    parser.add_option('--dnn_num_epochs', type = 'int', action= 'store', default = 50, help='number of epochs for training the DNN model.')
     parser.add_option('--dnn_lr', type = 'float', action= 'store', default = 0.001, help='learning rate for training the DNN model.')
     parser.add_option('--dnn_lr_decay', type = 'float', action= 'store', default = 0.02, 
                       help='learning rate reduced by this factor during training overall (a fraction of this is applied after each epoch).')
     parser.add_option('--dnn_num_layers', type = 'int', action= 'store', default = 3)
     parser.add_option('--dnn_layer_size', type = 'int', action= 'store', default = 200, help='number of neurons per hidden layerin the DNN model.')
     parser.add_option('--dnn_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate; must be 0 <= rate < 1.')
-    parser.add_option('--starting_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate for first iteration, must be 0 <= rate < 1.  Values > 0 promote initial exploration of the parameter space')
-    parser.add_option('--starting_tdc_dropout_rate', type = 'float', action= 'store', default = 0.0, help='dropout rate for first iteration, must be 0 <= rate < 1.  Values > 0 promote initial exploration of the parameter space')
+    parser.add_option('--starting_dropout_rate', type = 'float', action= 'store', default = 0.5, help='dropout rate for first iteration, must be 0 <= rate < 1.  Values > 0 promote initial exploration of the parameter space')
     parser.add_option('--dnn_gpu_id', type = 'int', action= 'store', default = 0, 
                       help='GPU ID to use for the DNN model (starts at 0; will default to CPU mode if no GPU is found or CUDA is not installed)')
     parser.add_option('--dnn_label_smoothing_0', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 0 (negatives)')
     parser.add_option('--dnn_label_smoothing_1', type = 'float', action= 'store', default = 0.99, help='Label smoothing class 1 (positives)')
     parser.add_option('--dnn_train_qtol', type = 'float', action= 'store', default = 0.1, help='AUC q-value tolerance for validation set.')
     parser.add_option('--snapshot_ensemble_count', type = 'int', action= 'store', default = 10, help='Number of ensembles to train.')
-    parser.add_option('--deep_direction_ensemble', type = 'int', action= 'store', default = 20, help='Number of ensembles to train.')
+    parser.add_option('--deep_direction_ensemble', type = 'int', action= 'store', default = 30, help='Number of ensembles to train.')
     parser.add_option('--false_positive_loss_factor', type = 'float', action= 'store', default = 4.0, help='Multiplicative factor to weight false positives')
     parser.add_option('--dnn_optimizer', type = 'string', action= 'store', default= 'adam', help='DNN solver to use.')
     (_options, _args) = parser.parse_args()
@@ -1777,9 +1767,11 @@ def main():
         params[tf_param] = check_arg_trueFalse(params[tf_param])
     if params["method"]!=3:
         params['deepInitDirection'] = False
-        params["tdc"] = False
     else:
         params['deepInitDirection'] = True
+        params['dnn_optimizer'] = params['dnn_optimizer'].lower()
+        if params['dnn_optimizer'] != 'adam' and params['dnn_optimizer'] != 'sgd':
+            raise ValueError('optimizer {} not supported'.format(hparams['dnn_optimizer']))
         
     scores, X, Y, pepstrings, sids0, expMasses, trainKeys, testKeys = mainIter(params)
     if params["tdc"]:
