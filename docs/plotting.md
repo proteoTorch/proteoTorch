@@ -3,10 +3,11 @@
 As discussed in the quickstart, *\# identifications vs q-value* plots are available after installation by calling **proteoTorchPlot**.  Options include
 * *\-\-output*: Output file name where the figure will be stored. **Default = figure.png**
 * *\-\-maxq*: Maximum q-value to plot to: 0 < q <= 1.0. **Default = 0.1**
-* *\-\-tdc*: Perform target-decoy competition (boolean). **Default = true**
+* *\-\-tdc*: Perform target-decoy competition (true/false). **Default = true**
 * *\-\-dataset*: PIN process which was analyze (only necessary if *tdc* = true).
-* *\-\-writeTdcResults*: Write the results of TDC for all methods to new files. **Default = false**
+* *\-\-writeTdcResults*: Write the results of TDC for all methods to new files (true/false). **Default = false**
 * *\-\-tdcOutputDir*: Output directory to write TDC competition results. **Default = ''**
+* *\-\-publish*: Apply plot settings from ProteoTorch paper (true/false). **Default = false**
 
 Furhter details are available in the source, module proteoTorch.plotQvals.
 
@@ -21,9 +22,9 @@ If target and decoy results are separated into two tab-delimited files, these ma
 As an example, the following plots ProteoTorch and Percolator recalibrated scores for PSMs collected searching a [draft of the human proteome dataset](https://www.nature.com/articles/nature13302) using the recently developed high-res MS2 p-value score function, [*residue-evidence combined p-value*](https://pubs.acs.org/doi/10.1021/acs.jproteome.8b00206):
 
     proteoTorchPlot --output kim_resev.png --maxq 0.1  \
-        --tdc --dataset kim_resev.pin \
+        --tdc true --dataset kim_resev.pin --publish true \
         "ProteoTorch DNN":"score":output_dir/output.txt \
-        "Percolator":'score':kim_resev_percTargets.txt:kim_resev_percDecoys.txt \
+        "Percolator":'score':kim_resev_percolator.targets.txt:kim_resev_percolator.decoys.txt \
         "NegLog10CombinePValue":'NegLog10CombinePValue':kim_resev.pin
 
 

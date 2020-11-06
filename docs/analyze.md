@@ -10,12 +10,13 @@ The following is a list of post-processing options when calling **proteoTorch** 
   * Method 2: linear SVM, solver L2-SVM-MFN (Percolator's solver)
   * Method 3: DNN (deep multi-layer perceptron, *default value*)
 * *\-\-output_dir*: where to write result files.  **Default = model_output/<data_file_name>/<time_stamp>/**
+* *\-\-tdc*: Use target-decoy competition to assign q-values (true/false).  **Default = true/**
 * *\-\-numThreads*: Number of CPU threads to use for parallelizable computations. **Default = 1**)
 * *\-\-initDirection*: If >= 0, specifies which feature to use as initial PSM scores during semi-supervised learning.  If = -1, automatically find and use the most discriminative feature. **Default = -1**
 * *\-\-q*: q-value tolerance when estimating positive training samples. **Default = 0.01**
 * *\-\-verbose*: Verbosity. **Default = 1**
 * *\-\-output_per_iter_granularity*: Specifies number of iterations to write recalibrated PSM scores. **Default = 5**
-* *\-\-write_output_per_iter*: Write recalibrated PSM scores after every *output_per_iter_granularity* iterations (boolean). **Default = true**
+* *\-\-write_output_per_iter*: Write recalibrated PSM scores after every *output_per_iter_granularity* iterations (true/false). **Default = true**
 * *\-\-maxIters*: Number of semi-supervised learning iterations to run. **Default = 20**
 * *\-\-seed*: Random seed when partitioning PSMs into cross-validation bins. **Default = 1**
 
@@ -34,7 +35,7 @@ The following is a list of post-processing options when calling **proteoTorch** 
 * *\-\-dnn_label_smoothing_1*: Label smoothing for training class 1 (targets within q-value tolerance). **Default = 0.99**
 * *\-\-dnn_train_qtol*: AUC q-value tolerance to measure validation performance. **Default = 0.1**
 * *\-\-false_positive_loss_factor*: Multiplicative factor to weight false positives during training. **Default = 4.0**
-* *\-\-deepInitDirection*: Produce initial PSM scores by training a large ensemble DNN to speed up training convergence (boolean). **Default = true if *method*=3**
+* *\-\-deepInitDirection*: Produce initial PSM scores by training a large ensemble DNN to speed up training convergence (true/false). **Default = true if *method*=3**
 * *\-\-deep_direction_ensemble*: Number of DNN ensembles to train during deep initial direction search. **Default = 30**
 * *\-\-load_previous_dnn*: Start iterations from previously saved model (boolean). **Default = false**
 * *\-\-previous_dnn_dir*: Previous output directory containing trained dnn weights.
