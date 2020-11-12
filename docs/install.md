@@ -3,6 +3,7 @@ ProteoTorch may be downloaded and installed using:
 
     git clone https://github.com/johnhalloran321/proteoTorch.git
     cd proteoTorch
+    python3 setup.py build
     python3 setup.py install
 
 ## Dependencies
