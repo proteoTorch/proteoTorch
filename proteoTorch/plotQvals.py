@@ -763,7 +763,7 @@ def load_test_scores(filenames, desc, scoreKey = 'score', qTol = 0.01, qCurveChe
 #############################################
 
 
-def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
+def plot(scorelists, output, qrange = 0.1, labels = None, publish = False, ylim = 0.0):
     linestyle = [ '-', '-', '-', '-', '-', '-', '-', '-', '-' ]
     linecolors = [  (0.0, 0.0, 0.0),
                     (0.8, 0.4, 0.0),
@@ -774,19 +774,59 @@ def plot(scorelists, output, qrange = 0.1, labels = None, **kwargs):
                     (0.95, 0.9, 0.25), 
                     (0.35, 0.7, 0.9),
                     (0.43, 0.17, 0.60)]
+
+    # linestyle = [ '-', '-', '-', '-', '-', '--', '-', '-', '-' ]
+    # linecolors = [  (0.0, 0.0, 0.0),
+    #                 (0.8, 0.4, 0.0),
+    #                 (0.35, 0.7, 0.9),
+    #                 (0.8, 0.6, 0.7),
+    #                 (0.0, 0.6, 0.5),
+    #                 (0.9, 0.6, 0.0),
+    #                 (0.95, 0.9, 0.25), 
+    #                 (0.35, 0.7, 0.9),
+    #                 (0.43, 0.17, 0.60)]
+
+    if publish:
+        matplotlib.rcParams['text.usetex'] = True
+        matplotlib.rcParams['font.size'] = 14
+        matplotlib.rcParams['legend.fontsize'] = 20
+        matplotlib.rcParams['xtick.labelsize'] = 24
+        matplotlib.rcParams['ytick.labelsize'] = 24
+        matplotlib.rcParams['axes.labelsize'] = 22
+
     xlabel = 'q-value'
-    ylabel = 'Spectra identified'
+    ylabel = 'Significant PSMs'
     pylab.clf()
     pylab.xlabel(xlabel)
     pylab.ylabel(ylabel)
     pylab.gray()
+
     h = -1
     for i,(q,p) in enumerate(scorelists):
         h = max(itertools.chain([h], (b for a, b in zip(q, p) if a <= qrange)))
         pylab.plot(q, p, color = linecolors[i], linewidth = 2, linestyle = linestyle[i])
+
+    # if publish:
+    #     yt, _ = pylab.yticks()
+    #     if all(v % 1000 == 0 for v in yt):
+    #         # yl = list('$%d$' % int(v/1000)  for v in yt)
+    #         yl = []
+    #         ytt = []
+    #         for v in yt:
+    #             if v < h:
+    #                 print(v)
+    #                 print(float(v)/float(1000))
+    #                 yl.append('$%f$' % float(v)/float(1000))
+    #                 ytt.append(v)
+    #         pylab.yticks(ytt, yl)
+    #         pylab.ylabel(ylabel + ' (in 1000\'s)')
+
+
     pylab.xlim([0,qrange])
-    pylab.ylim([0, h])
-    pylab.legend(labels, loc = 'lower right')
+
+    pylab.ylim([ylim, h])
+
+    pylab.legend(labels, loc = 'lower right', fontsize=20)
     print("Evaluated %d methods, saving plot to %s" % (len(labels), output))
     pylab.savefig(output, bbox_inches='tight')
 
@@ -1044,7 +1084,8 @@ def feature_histograms(pin, psmIds, output_dir, bins = 40, prob = False):
         pylab.savefig('%s' % output, bbox_inches='tight')
     
 
-def mainPlot(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = False, tdcOutputDir = ''):
+def mainPlot(args, output, maxq, doTdc = False, dataset = None, writeTdcResults = False, tdcOutputDir = '', 
+             publish = False, ylim = 0.0):
     '''
     input:
         
@@ -1078,7 +1119,7 @@ def mainPlot(args, output, maxq, doTdc = False, dataset = None, writeTdcResults 
         print ('%s: %d identifications, %d identified at q <= 0.01\n' % (desc, len(qs), naq))
     for argument in args:
         process(argument)
-    plot(scorelists, output, maxq, methods)
+    plot(scorelists, output, maxq, methods, publish, ylim)
 
 
 
@@ -1095,6 +1136,8 @@ def main():
     parser.add_option('--output', type = 'string', default='figure.png', help = 'Output file name where the figure will be stored.')
     parser.add_option('--maxq', type = 'float', default = 0.1, help = 'Maximum q-value to plot to: 0 < q <= 1.0')
     parser.add_option('--tdc', type = 'string', default = 'true', help = 'Perform target-decoy competition')
+    parser.add_option('--publish', type = 'string', default = 'false', help = 'Apply plot settings from ProteoTorch paper')
+    parser.add_option('--ylim', type = 'float', default = 0.0, help = 'Minimum y-value to plot')
     parser.add_option('--dataset', type = 'string', help = 'Original processed dataset in PIN format.  Only necessary if tdc set to True.')
     parser.add_option('--writeTdcResults', type = 'string', default = 'false', help = 'Write the results of TDC for all methods to new files.')
     parser.add_option('--tdcOutputDir', type = 'string', default = '', help = 'Output directory to write TDC competition results.')
@@ -1108,10 +1151,11 @@ def main():
     ########################
     OPTIONS.tdc = check_arg_trueFalse(OPTIONS.tdc)
     OPTIONS.writeTdcResults = check_arg_trueFalse(OPTIONS.writeTdcResults)
+    OPTIONS.publish = check_arg_trueFalse(OPTIONS.publish)
 
 
     mainPlot(ARGS, OPTIONS.output, OPTIONS.maxq, OPTIONS.tdc, OPTIONS.dataset, 
-             OPTIONS.writeTdcResults, OPTIONS.tdcOutputDir)
+             OPTIONS.writeTdcResults, OPTIONS.tdcOutputDir, OPTIONS.publish, OPTIONS.ylim)
     
 if __name__ == '__main__':
     main()
