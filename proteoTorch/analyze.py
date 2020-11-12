@@ -33,11 +33,12 @@ except:
     print("Loaded all solvers except L2-SVM-MFN")
     svmlinReady = False
 
-try:
-    from proteoTorch_qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
-except:
-    print("Warning: Cython q-value not found, loading strictly python q-value library, which slows down analysis significantly.")
-    from proteoTorch.pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
+from proteoTorch_qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
+# try:
+#     from proteoTorch_qvalues import calcQ, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # load cython library
+# except:
+#     print("Warning: Cython q-value not found, loading strictly python q-value library, which slows down analysis significantly.")
+#     from proteoTorch.pyfiles.qvalsBase import calcQ, getQValues, qMedianDecoyScore, calcQAndNumIdentified, numIdentifiedAtQ # import unoptimized q-value calculation
 
 import proteoTorch.dnn_code as dnn_code
 import proteoTorch.mini_utils as mini_utils

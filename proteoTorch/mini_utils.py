@@ -11,10 +11,11 @@ from os import makedirs as _makedirs
 from os.path import exists as _exists
 
 
-try:
-   from qvalues import calcQAndNumIdentified, numIdentifiedAtQ
-except:
-   from pyfiles.qvalsBase import calcQAndNumIdentified, numIdentifiedAtQ
+from proteoTorch_qvalues import calcQAndNumIdentified, numIdentifiedAtQ
+# try:
+#    from proteoTorch_qvalues import calcQAndNumIdentified, numIdentifiedAtQ
+# except:
+#    from pyfiles.qvalsBase import calcQAndNumIdentified, numIdentifiedAtQ
 #####################
 ### Generic Functions
 #####################

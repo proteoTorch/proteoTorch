@@ -49,7 +49,8 @@ def main():
         author_email=AUTHOR_EMAIL,
         description=DESCRIPTION,
         license=LICENSE,
-        packages=find_packages(include=["proteoTorch", "proteoTorch.*, proteoTorch_solvers"]),
+        packages=find_packages(include=["proteoTorch", "proteoTorch.pyfiles", "proteoTorch_solvers"]),
+        # packages=find_packages(include=["proteoTorch", "proteoTorch.*", proteoTorch_solvers"]),
         url=URL,
         platforms=['any'],
         install_requires=[
@@ -58,6 +59,7 @@ def main():
             'torch',
             'Cython'
         ],
+        package_data={'proteoTorch_solvers': ['libssl.so']},
         classifiers=CLASSIFIERS,
         ext_modules = cythonize("proteoTorch/cylibs/proteoTorch_qvalues.pyx",
                                 build_dir="build"),
