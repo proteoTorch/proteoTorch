@@ -2,7 +2,7 @@
 import sys
 
 if (sys.version_info[0] == 3 and sys.version_info[1] < 0):
-    print("PRISM requires Python version 3.0 or later")
+    print("ProteoTorch requires Python version 3.0 or later")
     sys.exit(1)
 
 from setuptools import setup, find_packages
@@ -13,11 +13,9 @@ import subprocess
 DISTNAME = 'ProteoTorch'
 VERSION = '0.1.0'
 DESCRIPTION = 'Deep semi-supervised learning for identification of shotgun proteomics data'
-# with open('README.md') as f_in:
-#     LONG_DESCRIPTION = f_in.read()
 AUTHOR = 'John T. Halloran, Gregor Urban'
 AUTHOR_EMAIL = 'johnhalloran321@gmail.com, gur9000@outlook.com'
-URL = 'https://github.com/johnhalloran321/proteoTorch'
+URL = 'https://github.com/proteoTorch/proteoTorch'
 LICENSE='OSL-3.0'
 
 CLASSIFIERS = ["Natural Language :: English",
